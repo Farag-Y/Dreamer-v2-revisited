@@ -144,7 +144,7 @@ class ActorCritic(nn.Module):
     def act(self, belief: torch.Tensor, state: torch.Tensor, explore: bool) -> torch.Tensor:
         if explore:
             action = self.actor.sample(belief, state)
-            action = action + self.cfg.action_noise * torch.randn_like(action)
+            action = action + self.cfg.action_noise * torch.randn_like(action) #TODO: Needs to be replaced with new method of maximizing entropy.
         else:
             action = self.actor.mode(belief, state)
         return action

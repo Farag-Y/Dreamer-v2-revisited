@@ -1,0 +1,144 @@
+
+import numpy as np
+import torch
+
+from env_wrapper import postprocess_observation, preprocess_observation_
+
+
+class ExperienceReplay:
+    def __init__(
+        self,
+        experience_size: int,
+        observation_size: int,
+        image_shape: list[int],
+        action_size: int,
+        device: str,
+    ) -> None:
+        self.device = device
+        #TODO: Observation size will only be used in symbolic envs
+        # Observations are stored quantised as uint8 (4x less memory than float32)
+        self.observations = np.empty((experience_size, image_shape[0], image_shape[1], image_shape[2]), dtype=np.uint8)
+        self.actions = np.empty((experience_size, action_size), dtype=np.float32)
+        self.rewards = np.empty((experience_size,), dtype=np.float32)
+        self.non_terminals = np.empty((experience_size, 1), dtype=np.float32)
+        self.true_nonterminals = np.empty((experience_size, 1), dtype=np.float32)
+        self.idx, self.steps, self.episodes = 0, 0, 0
+        self.full = False
+        self.size = experience_size
+        self.episode_bounds: list[tuple[int, int]] = []
+        self._episode_start_step = 0
+
+    def append(
+        self, observation: torch.Tensor, reward: float, action: torch.Tensor, done: bool, terminated: bool,
+    ) -> None:
+        self.observations[self.idx] = postprocess_observation(observation.numpy())
+        self.rewards[self.idx] = reward
+        self.actions[self.idx] = action
+        self.non_terminals[self.idx] = not done
+        self.true_nonterminals[self.idx] = not terminated
+        self.idx = (self.idx + 1) % self.size
+        self.full = self.full or self.idx == 0
+        if done:
+            length = self.steps + 1 - self._episode_start_step
+            self.episode_bounds.append((self._episode_start_step, length))
+            self._episode_start_step = self.steps + 1
+        self.steps += 1
+        self.episodes += (1 if done else 0)
+        self._prune_stale_episodes()
+
+    def _prune_stale_episodes(self) -> None:
+        valid_start = max(0, self.steps - self.size)
+        while self.episode_bounds and self.episode_bounds[0][0] < valid_start:
+            self.episode_bounds.pop(0)
+
+    def _get_indexes(self, batch_size: int, batch_length: int) -> list[int]:
+
+        eligible = [(start, length) for start, length in self.episode_bounds if length >= batch_length]
+        if not eligible:
+            raise ValueError(
+                f"No completed episode currently in the buffer is long enough to "
+                f"sample batch_length={batch_length} ({len(self.episode_bounds)} "
+                "completed episodes tracked)."
+            )
+        batches = []
+        for _ in range(batch_size):
+            start, length = eligible[np.random.randint(len(eligible))]
+            offset = np.random.randint(length - batch_length + 1)
+            window_start = start + offset
+            idxs = np.arange(window_start, window_start + batch_length) % self.size
+            batches.append(idxs)
+        return batches
+
+    def _get_batch(
+        self, idxs: list[np.ndarray], batch_size: int, batch_length: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Stack list of per-sample index arrays into shape (batch_size, batch_length)
+        stacked = np.stack(idxs, axis=0)
+        obs = torch.as_tensor(self.observations[stacked].astype(np.float32))
+        preprocess_observation_(obs)
+        obs = obs.to(self.device).transpose(0, 1)
+        acts = torch.as_tensor(self.actions[stacked]).to(self.device).transpose(0, 1)
+        rewards = torch.as_tensor(self.rewards[stacked]).to(self.device).transpose(0, 1)
+        non_terminals = torch.as_tensor(self.non_terminals[stacked]).to(self.device).transpose(0, 1)
+        true_nonterminals = torch.as_tensor(self.true_nonterminals[stacked]).to(self.device).transpose(0, 1)
+        return obs, acts, rewards, non_terminals, true_nonterminals
+
+    def sample(
+        self, batch_size: int, batch_length: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch_idxs = self._get_indexes(batch_size, batch_length)
+        batches = self._get_batch(batch_idxs, batch_size, batch_length)
+        return batches
+
+    def save(self, path: str) -> None:
+        torch.save({
+            'observations': self.observations, 'actions': self.actions,
+            'rewards': self.rewards, 'non_terminals': self.non_terminals,
+            'true_nonterminals': self.true_nonterminals,
+            'idx': self.idx, 'steps': self.steps,
+            'episodes': self.episodes, 'full': self.full, 'size': self.size,
+        }, path)
+
+    @classmethod
+    def load(cls, path: str, device: str) -> 'ExperienceReplay':
+        import numpy.core.multiarray
+        import numpy.dtypes
+        safe = [
+            numpy.core.multiarray._reconstruct,
+            np.ndarray,
+            np.dtype,
+            numpy.dtypes.UInt8DType,
+            numpy.dtypes.Float32DType,
+        ]
+        with torch.serialization.safe_globals(safe):
+            data = torch.load(path, map_location='cpu', weights_only=True)
+        instance = cls.__new__(cls)
+        instance.device        = device
+        instance.observations  = data['observations']
+        # Buffers saved before the switch to uint8 storage hold preprocessed float32 frames
+        if instance.observations.dtype != np.uint8:
+            instance.observations = postprocess_observation(instance.observations)
+        instance.actions       = data['actions']
+        instance.rewards       = data['rewards']
+        instance.non_terminals = data['non_terminals']
+        instance.true_nonterminals = data.get('true_nonterminals', np.ones_like(instance.non_terminals))
+        instance.idx           = data['idx']
+        instance.steps         = data['steps']
+        instance.episodes      = data['episodes']
+        instance.full          = data['full']
+        instance.size          = data['size']
+        instance._rebuild_episode_bounds()
+        return instance
+
+    def _rebuild_episode_bounds(self) -> None:
+        resident = self.size if self.full else self.idx
+        absolute_start = self.steps - resident
+        self.episode_bounds = []
+        current_start = absolute_start
+        for i in range(resident):
+            absolute_step = absolute_start + i
+            pos = absolute_step % self.size
+            if self.non_terminals[pos, 0] == 0:
+                self.episode_bounds.append((current_start, absolute_step - current_start + 1))
+                current_start = absolute_step + 1
+        self._episode_start_step = current_start

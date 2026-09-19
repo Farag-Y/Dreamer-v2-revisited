@@ -1,0 +1,77 @@
+# Experiment
+id: default
+seed: 1
+
+# Environment
+env: finger-turn-hard
+symbolic_env: false
+max_episode_length: 1000
+action_repeat: 2 ## Unlike planet, a constant action repeat for the chosen envs.
+render: false
+imagination_horizon: 15
+
+# Training
+episodes: 3000
+seed_episodes: 5
+collect_interval: 100
+batch_size: 50
+chunk_size: 50
+experience_size: 100000
+
+# Model
+embedding_size: 1024
+hidden_size: 200 #TODO: Check RSSM for dreamer is also still 200
+belief_size: 200
+state_size: 30
+activation_function: elu  # RSSM activation; reference is always ELU here, never configurable/ReLU
+dense_hidden_size: 400  # reward/actor/critic/discount models width. NOTE: the Dreamer v1 paper text says
+# "three dense layers of size 300" for all non-encoder/decoder/RSSM networks, but the paper and the
+# released reference implementation (danijar/dreamer, dreamer.py:_build_model) do not agree: the actual
+# code uses num_units=400 everywhere, and varies depth per network (reward=2 hidden layers, value=3,
+# discount/pcont=3, actor=4 hidden layers - not a uniform 3 for all).
+dense_activation_function: elu 
+lam: 0.95
+# Optimisation
+learning_rate: 6e-4 #TODO: Revise on learning rate from paper
+actor_learning_rate: 8e-5
+critic_learning_rate: 8e-5
+discount_model_gamma: 0.99
+discount_loss_scale: 10.0 #Only applied on termenating envs
+learning_rate_schedule: 0
+adam_epsilon: 1e-4
+grad_clip_norm: 100
+
+# Overshooting
+overshooting_distance: 50
+overshooting_kl_beta: 0
+overshooting_reward_scale: 0
+
+# Losses
+global_kl_beta: 0.0
+free_nats: 3.0
+
+# Action noise
+action_noise: 0.3
+
+# Hardware
+disable_cuda: false
+
+# Evaluation
+test: false
+test_interval: 25
+test_episodes: 10
+
+# Checkpointing
+checkpoint_interval: 25
+experience_replay_interval: 100  # save experience_replay_{episode}.pt alongside metrics.png every N episodes (0 = disabled)
+models: "./checkpoints/2026-09-16_18-27-50_checkpoint_2000/2026-09-16_18-27-50_checkpoint_2000_models.pt"
+experience_replay_path: "./checkpoints/2026-09-16_18-27-50_checkpoint_2000/2026-09-16_18-27-50_experience_replay_2000.pt"
+# models: "results/vast-ai-first/Checkpoint_150/models.pt"
+# experience_replay_path: "results/vast-ai-first/Checkpoint_150/experience_replay.pt"
+
+# Cloud storage (Cloudflare R2)
+# Enable with: r2_enabled=true r2_bucket=my-bucket
+# Credentials via env vars: CF_R2_ACCOUNT_ID, CF_R2_ACCESS_KEY, CF_R2_SECRET_KEY
+r2_enabled: true
+r2_bucket: "planet-checkpoints-vastai"
+r2_log_path: ""   # path to training log on disk; set to /workspace/training.log on Vast.ai

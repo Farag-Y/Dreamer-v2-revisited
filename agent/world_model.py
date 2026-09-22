@@ -14,6 +14,7 @@ from models.rssm import RSSM, RSSMOutput
 from utils import model_wrapper
 
 
+#TODO: REMOVE FROM BOTH V2 and V1
 def _latent_overshooting(
     cfg: DictConfig,
     rssm: RSSM,
@@ -92,6 +93,8 @@ class WorldModel(nn.Module):
             state_size=cfg.state_size,
             hidden_size=cfg.hidden_size,
             belief_size=cfg.belief_size,
+            num_categorical= cfg.num_categorical,
+            num_classes=cfg.num_classes,
             action_size=action_size,
             obs_size=cfg.embedding_size,
             non_linearity=cfg.activation_function,
@@ -133,10 +136,10 @@ class WorldModel(nn.Module):
         encoded_obs = model_wrapper(self.encoder, obs[1:])
         rssm_output: RSSMOutput = self.observe(actions[:-1], encoded_obs, init_belief, init_state, nonterminals[:-1])
         predicted_reward = model_wrapper(self.reward_model, rssm_output.det_hidden_states, rssm_output.posterior_states, trailing_dims=1)
-
+        #TODO: Still need to implement proper categorical loss + kl balancing.
         kl_div = kl_divergence(
-            Normal(rssm_output.posterior_means, rssm_output.posterior_std_devs),
-            Normal(rssm_output.prior_means,     rssm_output.prior_std_devs),
+            rssm_output.posterior_logits,
+            rssm_output.prior_logits,
         ).sum(dim=-1)
         kl_loss = torch.max(kl_div.mean(), free_nats.squeeze())
         if self.train_discount:

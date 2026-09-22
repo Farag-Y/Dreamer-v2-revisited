@@ -4,8 +4,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-MIN_STD_DEV = 0.1
-
 
 @dataclass
 class RSSMOutput:
@@ -32,15 +30,14 @@ class RSSM(nn.Module):
         super().__init__()
         self.act_fn = getattr(F, non_linearity)
         self.std_dev_fn = getattr(F, std_dev_fn)
-        self.min_std_dev = MIN_STD_DEV
         self.num_categorical = num_categorical
         self.num_classes=num_classes
         self.fc_embed_state_action     = nn.Linear(state_size + action_size, belief_size)
         self.rnn                       = nn.GRUCell(input_size=belief_size, hidden_size=belief_size)
         self.fc_embed_belief_prior     = nn.Linear(belief_size, hidden_size)
-        self.fc_state_prior            = nn.Linear(hidden_size, num_categorical*num_classes) #C-TODO: Check if correct
+        self.fc_state_prior            = nn.Linear(hidden_size, num_categorical*num_classes)
         self.fc_embed_belief_posterior = nn.Linear(belief_size + obs_size, hidden_size)
-        self.fc_state_posterior        = nn.Linear(hidden_size, num_categorical*num_classes) #C-TODO: Check if correct
+        self.fc_state_posterior        = nn.Linear(hidden_size, num_categorical*num_classes)
 
     def forward(
         self,

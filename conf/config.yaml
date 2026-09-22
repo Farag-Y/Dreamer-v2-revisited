@@ -20,7 +20,9 @@ experience_size: 100000
 
 # Model
 embedding_size: 1024
-hidden_size: 200 #TODO: Check RSSM for dreamer is also still 200
+hidden_size: 200
+num_classes: 32
+num_categorical: 32
 belief_size: 200
 state_size: 30
 activation_function: elu  # RSSM activation; reference is always ELU here, never configurable/ReLU

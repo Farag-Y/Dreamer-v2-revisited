@@ -11,11 +11,9 @@ MIN_STD_DEV = 0.1
 class RSSMOutput:
     det_hidden_states:  torch.Tensor
     prior_states:       torch.Tensor
-    prior_means:        torch.Tensor
-    prior_std_devs:     torch.Tensor
+    prior_logits:        torch.Tensor
     posterior_states:   torch.Tensor | None = None
-    posterior_means:    torch.Tensor | None = None
-    posterior_std_devs: torch.Tensor | None = None
+    posterior_logits:    torch.Tensor | None = None
 
 
 class RSSM(nn.Module):
@@ -25,6 +23,8 @@ class RSSM(nn.Module):
         hidden_size: int,
         belief_size: int,
         action_size: int,
+        num_categorical:int,
+        num_classes:int,
         obs_size: int,
         non_linearity: str = 'relu',
         std_dev_fn: str = "softplus",
@@ -33,12 +33,14 @@ class RSSM(nn.Module):
         self.act_fn = getattr(F, non_linearity)
         self.std_dev_fn = getattr(F, std_dev_fn)
         self.min_std_dev = MIN_STD_DEV
+        self.num_categorical = num_categorical
+        self.num_classes=num_classes
         self.fc_embed_state_action     = nn.Linear(state_size + action_size, belief_size)
         self.rnn                       = nn.GRUCell(input_size=belief_size, hidden_size=belief_size)
         self.fc_embed_belief_prior     = nn.Linear(belief_size, hidden_size)
-        self.fc_state_prior            = nn.Linear(hidden_size, 2 * state_size)
+        self.fc_state_prior            = nn.Linear(hidden_size, num_categorical*num_classes) #C-TODO: Check if correct
         self.fc_embed_belief_posterior = nn.Linear(belief_size + obs_size, hidden_size)
-        self.fc_state_posterior        = nn.Linear(hidden_size, 2 * state_size)
+        self.fc_state_posterior        = nn.Linear(hidden_size, num_categorical*num_classes) #C-TODO: Check if correct
 
     def forward(
         self,
@@ -49,12 +51,14 @@ class RSSM(nn.Module):
         nonterminals: torch.Tensor | None = None,
     ) -> RSSMOutput:
         sequence_length = actions.shape[0] +1
-        (det_hidden_states, prior_states, prior_means, prior_std_devs,
-            posterior_states, posterior_means, posterior_std_devs) = (
-                [[torch.empty(0)] * sequence_length for _ in range(7)]
+        num_classes = self.num_classes
+        num_categorical = self.num_categorical
+        (det_hidden_states, prior_states,prior_logits,
+            posterior_states,posterior_logits) = (
+                [[torch.empty(0)] * sequence_length for _ in range(5)]
             )
         #Belifes is the detemnistic hidden state
-        det_hidden_states[0],prior_states[0],posterior_states[0] = prev_belief,prev_state,prev_state #TODO: Why here does prior and posterior share the same state ?
+        det_hidden_states[0],prior_states[0],posterior_states[0] = prev_belief,prev_state,prev_state
         for t in range(actions.shape[0]):
             prev_state = prior_states[t] if observations is None else posterior_states[t]
             prev_state = prev_state if nonterminals is None else prev_state*nonterminals[t]
@@ -65,26 +69,28 @@ class RSSM(nn.Module):
 
             ## Prior
             hidden_prior = self.act_fn(self.fc_embed_belief_prior(det_hidden_states[t+1]))
-            prior_means[t+1],prior_std_devs[t+1] = torch.chunk(self.fc_state_prior(hidden_prior),2,dim=1)
-            prior_std_devs[t+1] = self.std_dev_fn(prior_std_devs[t+1]) + self.min_std_dev
-            ##Reparam trick
-            prior_states[t+1] = prior_means[t+1] + prior_std_devs[t+1]*torch.randn_like(prior_std_devs[t+1]) #TODO: rand like Std_dev here is correct ?
+            prior_logits[t+1] = self.fc_state_prior(hidden_prior).reshape(-1,num_categorical,num_classes)
+            prior_sample = self.draw(prior_logits[t+1])
+            prior_probs = F.softmax(prior_logits[t+1], dim=-1)
+            prior_states[t+1] = prior_sample + prior_probs - prior_probs.detach()
+            prior_states[t+1]=prior_states[t+1].reshape(-1,num_classes*num_categorical)
+
             ##Posterior 
             if observations is not None:
-                ## TODO: is this correct here ?? make sure that shape and concatation is correct
                 hidden_posterior = self.act_fn(self.fc_embed_belief_posterior(torch.concat((det_hidden_states[t+1],observations[t]),dim=1)))
-                posterior_means[t+1],posterior_std_devs[t+1] = torch.chunk(self.fc_state_posterior(hidden_posterior),2,dim=1)
-                posterior_std_devs[t+1] = self.std_dev_fn(posterior_std_devs[t+1])+self.min_std_dev
-                #Reparam trick
-                posterior_states[t+1] = posterior_means[t+1] + posterior_std_devs[t+1]*torch.randn_like(posterior_std_devs[t+1]) #TODO: rand like Std_dev here is correct ?
-                # Return new hidden states
+                posterior_logits[t+1] = self.fc_state_posterior(hidden_posterior).reshape(-1,num_categorical,num_classes)
+                posterior_sample = self.draw(posterior_logits[t+1])
+                posterior_probs = F.softmax(posterior_logits[t+1], dim=-1)
+                posterior_states[t+1] = posterior_sample + posterior_probs - posterior_probs.detach()
+                posterior_states[t+1]=posterior_states[t+1].reshape(-1,num_classes*num_categorical)
         return RSSMOutput(
             det_hidden_states=torch.stack(det_hidden_states[1:], dim=0),
             prior_states=torch.stack(prior_states[1:], dim=0),
-            prior_means=torch.stack(prior_means[1:], dim=0),
-            prior_std_devs=torch.stack(prior_std_devs[1:], dim=0),
+            prior_logits=torch.stack(prior_logits[1:], dim=0),
             posterior_states=torch.stack(posterior_states[1:], dim=0) if observations is not None else None,
-            posterior_means=torch.stack(posterior_means[1:], dim=0) if observations is not None else None,
-            posterior_std_devs=torch.stack(posterior_std_devs[1:], dim=0) if observations is not None else None,
+            posterior_logits=torch.stack(posterior_logits[1:], dim=0) if observations is not None else None,
         )
-
+    #TODO: draw can move into utils alongside the actor_critic one too.
+    def draw(self,logits: torch.Tensor) -> torch.Tensor:
+        dist = torch.distributions.OneHotCategorical(logits=logits)
+        return dist.sample()

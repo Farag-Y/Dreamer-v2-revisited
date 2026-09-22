@@ -25,11 +25,9 @@ class RSSM(nn.Module):
         num_classes:int,
         obs_size: int,
         non_linearity: str = 'relu',
-        std_dev_fn: str = "softplus",
     ) -> None:
         super().__init__()
         self.act_fn = getattr(F, non_linearity)
-        self.std_dev_fn = getattr(F, std_dev_fn)
         self.num_categorical = num_categorical
         self.num_classes=num_classes
         self.fc_embed_state_action     = nn.Linear(state_size + action_size, belief_size)

@@ -43,11 +43,6 @@ learning_rate_schedule: 0
 adam_epsilon: 1e-4
 grad_clip_norm: 100
 
-# Overshooting
-overshooting_distance: 50
-overshooting_kl_beta: 0
-overshooting_reward_scale: 0
-
 # Losses
 global_kl_beta: 0.0
 free_nats: 3.0

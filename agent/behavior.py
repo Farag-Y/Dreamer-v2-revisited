@@ -21,23 +21,25 @@ def _imagine_rollout(
     actor: Actor,
     reward_model: RewardModel,
     rssm: RSSM,
-    discount_model:DiscountModel,
+    discount_model: DiscountModel,
     horizon: int = 15,
-    discount_model_gamma:float=0.99,
-    discount_enabled:bool=False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    discount_model_gamma: float = 0.99,
+    discount_enabled: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     states = [start_state]
     beliefs = [start_belief]
     rewards = []
-    discounts=[]
+    discounts = []
+    actions = []
 
     state = start_state
     belief = start_belief
     for _ in range(horizon):
         rewards.append(reward_model(belief, state))
 
-        action = actor.sample(belief.detach(), state.detach()).unsqueeze(0)
-        rssm_out = rssm(state, action, belief)
+        action = actor.sample(belief.detach(), state.detach())
+        actions.append(action.detach())
+        rssm_out = rssm(state, action.unsqueeze(0), belief)
         gamma_hat = (
             torch.sigmoid(discount_model(belief, state)) * discount_model_gamma
             if discount_enabled
@@ -54,9 +56,12 @@ def _imagine_rollout(
     states = torch.stack(states, dim=1)
     beliefs = torch.stack(beliefs, dim=1)
     rewards = torch.stack(rewards, dim=1)
-    discounts = torch.stack(discounts,dim=1)
-    return states, beliefs, rewards,discounts
-#TODO: Revise again calculation of vlambda !
+    discounts = torch.stack(discounts, dim=1)
+    actions = torch.stack(actions, dim=1)  # (N, H, action_size)
+    return states, beliefs, rewards, discounts, actions
+
+
+# TODO: Revise again calculation of vlambda !
 def _compute_vlambda(
     states: torch.Tensor,
     beliefs: torch.Tensor,
@@ -64,7 +69,7 @@ def _compute_vlambda(
     discounts: torch.Tensor,
     critic: Critic,
     lam: float = 0.95,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     batch, H = rewards.shape
     device, dtype = states.device, states.dtype
 
@@ -93,7 +98,7 @@ def _compute_vlambda(
             vl = vl + weight * V_kN
 
         V_lambda[:, tau] = vl
-    return V_lambda
+    return V_lambda, values
 
 
 def _outer_discount(discounts: torch.Tensor) -> torch.Tensor:
@@ -103,7 +108,10 @@ def _outer_discount(discounts: torch.Tensor) -> torch.Tensor:
 
 
 def _critic_loss(
-    states: torch.Tensor, beliefs: torch.Tensor, v_lambda: torch.Tensor, critic: Critic,
+    states: torch.Tensor,
+    beliefs: torch.Tensor,
+    v_lambda: torch.Tensor,
+    critic: Critic,
     weight: torch.Tensor,
 ) -> torch.Tensor:
     batch, T = states.shape[:2]
@@ -115,8 +123,36 @@ def _critic_loss(
     return 0.5 * (weight * (v_pred - target).pow(2)).mean()
 
 
-def _actor_loss(v_lambda: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-    return -(weight * v_lambda).mean()
+def _policy_terms(
+    actor: Actor,
+    beliefs: torch.Tensor,
+    states: torch.Tensor,
+    actions: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    batch, T = states.shape[:2]
+    policy = actor.distribution(
+        beliefs.detach().reshape(-1, beliefs.shape[-1]),
+        states.detach().reshape(-1, states.shape[-1]),
+    )
+    log_prob = policy.log_prob(actions.reshape(batch * T, -1)).reshape(batch, T)
+    entropy = policy.entropy().reshape(batch, T)
+    return log_prob, entropy
+
+
+def _actor_loss(
+    v_lambda: torch.Tensor,
+    weight: torch.Tensor,
+    log_prob: torch.Tensor,
+    entropy: torch.Tensor,
+    advantage: torch.Tensor,
+    mix: float,
+    entropy_scale: float,
+) -> torch.Tensor:
+    reinforce = log_prob * advantage.detach()
+    objective = mix * reinforce + entropy_scale * entropy
+    if mix < 1.0:  # dynamics backprop through the rollout; skipped at mix=1 to avoid a zero-gradient backward pass
+        objective = objective + (1 - mix) * v_lambda
+    return -(weight * objective).mean()
 
 
 class ActorCritic(nn.Module):
@@ -140,11 +176,12 @@ class ActorCritic(nn.Module):
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=cfg.critic_learning_rate, eps=cfg.adam_epsilon)
         self.discount_enabled = cfg.env in TERMINATING_ENVS
 
-
     def act(self, belief: torch.Tensor, state: torch.Tensor, explore: bool) -> torch.Tensor:
         if explore:
             action = self.actor.sample(belief, state)
-            action = action + self.cfg.action_noise * torch.randn_like(action) #TODO: Needs to be replaced with new method of maximizing entropy.
+            action = action + self.cfg.action_noise * torch.randn_like(
+                action
+            )  # TODO: Needs to be replaced with new method of maximizing entropy.
         else:
             action = self.actor.mode(belief, state)
         return action
@@ -155,28 +192,45 @@ class ActorCritic(nn.Module):
         belief = belief.reshape(-1, belief.shape[-1]).detach()
 
         with FreezeParameters(world_model.rssm):
-            states, beliefs, rewards,discounts = _imagine_rollout(
-                start_state=state, start_belief=belief,
-                actor=self.actor, reward_model=world_model.reward_model, rssm=world_model.rssm,discount_model=world_model.discount_model,
-                horizon=cfg.imagination_horizon,discount_model_gamma=cfg.discount_model_gamma,discount_enabled=self.discount_enabled
+            states, beliefs, rewards, discounts, actions = _imagine_rollout(
+                start_state=state,
+                start_belief=belief,
+                actor=self.actor,
+                reward_model=world_model.reward_model,
+                rssm=world_model.rssm,
+                discount_model=world_model.discount_model,
+                horizon=cfg.imagination_horizon,
+                discount_model_gamma=cfg.discount_model_gamma,
+                discount_enabled=self.discount_enabled,
             )
-            v_lambda = _compute_vlambda(states, beliefs, rewards, discounts, self.critic, cfg.lam)
+            v_lambda, values = _compute_vlambda(states, beliefs, rewards, discounts, self.critic, cfg.lam)
 
-        states_mid  = states[:, 1:-1]
+        states_mid = states[:, 1:-1]
         beliefs_mid = beliefs[:, 1:-1]
         v_lambda_mid = v_lambda[:, 1:-1]
         outer_discount = _outer_discount(discounts)
 
+        log_prob, entropy = _policy_terms(self.actor, beliefs_mid, states_mid, actions[:, 1:])
+        advantage = v_lambda_mid - values[:, 1:-1]  # baseline: critic V(s_t); TODO: target critic (Section 7)
+
         self.actor_optim.zero_grad()
-        a_loss = _actor_loss(v_lambda_mid, outer_discount)
+        a_loss = _actor_loss(
+            v_lambda_mid,
+            outer_discount,
+            log_prob,
+            entropy,
+            advantage,
+            cfg.actor_grad_mix,
+            cfg.actor_entropy_scale,
+        )
         a_loss.backward()
-        nn.utils.clip_grad_norm_(self.actor_optim.param_groups[0]['params'], cfg.grad_clip_norm)
+        nn.utils.clip_grad_norm_(self.actor_optim.param_groups[0]["params"], cfg.grad_clip_norm)
         self.actor_optim.step()
 
         self.critic_optim.zero_grad()
         c_loss = _critic_loss(states_mid, beliefs_mid, v_lambda_mid, self.critic, outer_discount)
         c_loss.backward()
-        nn.utils.clip_grad_norm_(self.critic_optim.param_groups[0]['params'], cfg.grad_clip_norm)
+        nn.utils.clip_grad_norm_(self.critic_optim.param_groups[0]["params"], cfg.grad_clip_norm)
         self.critic_optim.step()
 
-        return {'actor_loss': a_loss.item(), 'critic_loss': c_loss.item()}
+        return {"actor_loss": a_loss.item(), "critic_loss": c_loss.item(), "actor_entropy": entropy.mean().item()}

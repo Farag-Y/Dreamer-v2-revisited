@@ -67,7 +67,7 @@ class RSSM(nn.Module):
             prior_logits[t+1] = self.fc_state_prior(hidden_prior).reshape(-1,num_categorical,num_classes)
             prior_sample = self.draw(prior_logits[t+1])
             prior_probs = F.softmax(prior_logits[t+1], dim=-1)
-            prior_states[t+1] = prior_sample + prior_probs - prior_probs.detach()
+            prior_states[t+1] = prior_sample + (prior_probs - prior_probs.detach())
             prior_states[t+1]=prior_states[t+1].reshape(-1,num_classes*num_categorical)
 
             ##Posterior 
@@ -76,7 +76,7 @@ class RSSM(nn.Module):
                 posterior_logits[t+1] = self.fc_state_posterior(hidden_posterior).reshape(-1,num_categorical,num_classes)
                 posterior_sample = self.draw(posterior_logits[t+1])
                 posterior_probs = F.softmax(posterior_logits[t+1], dim=-1)
-                posterior_states[t+1] = posterior_sample + posterior_probs - posterior_probs.detach()
+                posterior_states[t+1] = posterior_sample + (posterior_probs - posterior_probs.detach())
                 posterior_states[t+1]=posterior_states[t+1].reshape(-1,num_classes*num_categorical)
         return RSSMOutput(
             det_hidden_states=torch.stack(det_hidden_states[1:], dim=0),

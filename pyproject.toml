@@ -30,7 +30,7 @@ torchvision = [
     { index = "pytorch-cu121", marker = "sys_platform == 'linux'" },
 ]
 
-[tool.black]
+[tool.ruff]
 line-length = 120
 
 [[tool.uv.index]]

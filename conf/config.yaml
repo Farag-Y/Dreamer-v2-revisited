@@ -24,7 +24,7 @@ hidden_size: 200
 num_classes: 32
 num_categorical: 32
 belief_size: 200
-state_size: 30
+state_size: 1024
 activation_function: elu  # RSSM activation; reference is always ELU here, never configurable/ReLU
 dense_hidden_size: 400  # reward/actor/critic/discount models width. NOTE: the Dreamer v1 paper text says
 # "three dense layers of size 300" for all non-encoder/decoder/RSSM networks, but the paper and the
@@ -33,6 +33,8 @@ dense_hidden_size: 400  # reward/actor/critic/discount models width. NOTE: the D
 # discount/pcont=3, actor=4 hidden layers - not a uniform 3 for all).
 dense_activation_function: elu 
 lam: 0.95
+
+
 # Optimisation
 learning_rate: 6e-4 #TODO: Revise on learning rate from paper
 actor_learning_rate: 8e-5
@@ -45,8 +47,9 @@ grad_clip_norm: 100
 
 # Losses
 global_kl_beta: 0.0
-free_nats: 3.0
-
+free_nats: 0.0
+kl_scale: 0.1
+kl_balance_alpha: 0.8
 # Action noise
 action_noise: 0.3
 

@@ -4,6 +4,8 @@ import cv2
 import numpy as np
 import torch
 
+from env_registry import ATARI_ENVS, DMCONTROL_ENVS, GYM_ENVS
+
 
 def preprocess_observation_(observation: torch.Tensor) -> None:
     observation.div_(255.0).sub_(0.5)
@@ -15,7 +17,9 @@ def postprocess_observation(observation: np.ndarray) -> np.ndarray:
 
 class BaseEnv(abc.ABC):
     def _images_to_observation(self, images: np.ndarray) -> torch.Tensor:
-        images_t = torch.tensor(cv2.resize(images, (64, 64), interpolation=cv2.INTER_LINEAR).transpose(2, 0, 1), dtype=torch.float32)
+        images_t = torch.tensor(
+            cv2.resize(images, (64, 64), interpolation=cv2.INTER_LINEAR).transpose(2, 0, 1), dtype=torch.float32
+        )
         preprocess_observation_(images_t)
         return images_t.unsqueeze(dim=0)
 
@@ -49,12 +53,17 @@ class BaseEnv(abc.ABC):
     @abc.abstractmethod
     def render_frame(self, height: int = 480, width: int = 480) -> np.ndarray: ...
 
+    @property
+    def discrete_actions(self) -> bool:
+        return False
+
 
 class GymEnv(BaseEnv):
     def __init__(self, env: str, seed: int, max_episode_length: int, action_repeat: int) -> None:
         import gymnasium as gym
+
         gym.logger.min_level = gym.logger.ERROR
-        self._env = gym.make(env, render_mode='rgb_array')
+        self._env = gym.make(env, render_mode="rgb_array")
         self._seed = seed
         self.max_episode_length = max_episode_length
         self.action_repeat = action_repeat
@@ -83,7 +92,7 @@ class GymEnv(BaseEnv):
     def render(self) -> None:
         frame = self._env.render()
         if frame is not None:
-            cv2.imshow('screen', frame[:, :, ::-1])
+            cv2.imshow("screen", frame[:, :, ::-1])
             cv2.waitKey(1)
 
     def close(self) -> None:
@@ -113,14 +122,15 @@ class DMControlEnv(BaseEnv):
     def __init__(self, env: str, seed: int, max_episode_length: int, action_repeat: int) -> None:
         import mujoco
         from dm_control import suite
-        domain, *task_parts = env.split('-')
-        task = '_'.join(task_parts)
-        self._env = suite.load(domain, task, task_kwargs={'random': seed})
+
+        domain, *task_parts = env.split("-")
+        task = "_".join(task_parts)
+        self._env = suite.load(domain, task, task_kwargs={"random": seed})
         self.max_episode_length = max_episode_length
         self.action_repeat = action_repeat
-        self._camera_id = {'quadruped': 2}.get(domain, 0)
+        self._camera_id = {"quadruped": 2}.get(domain, 0)
         model = self._env.physics.model.ptr
-        self._obs_renderer  = mujoco.Renderer(model, height=64,  width=64)
+        self._obs_renderer = mujoco.Renderer(model, height=64, width=64)
         self._disp_renderer = mujoco.Renderer(model, height=240, width=320)
         self._play_renderer = mujoco.Renderer(model, height=480, width=480)
 
@@ -150,7 +160,7 @@ class DMControlEnv(BaseEnv):
     def render(self) -> None:
         self._disp_renderer.update_scene(self._env.physics.data.ptr, camera=self._camera_id)
         frame = self._disp_renderer.render()
-        cv2.imshow('screen', frame[:, :, ::-1])
+        cv2.imshow("screen", frame[:, :, ::-1])
         cv2.waitKey(1)
 
     def render_frame(self, height: int = 480, width: int = 480) -> np.ndarray:
@@ -185,58 +195,80 @@ class DMControlEnv(BaseEnv):
         return torch.from_numpy(action.astype(np.float32))
 
 
-# pip install gymnasium[classic-control]
-GYM_ENVS_CLASSIC = [
-    'Pendulum-v1',
-    'MountainCarContinuous-v0',
-]
+class AtariEnv(BaseEnv):
+    def __init__(self, env: str, seed: int, max_episode_length: int, action_repeat: int) -> None:
+        import ale_py
+        import gymnasium as gym
 
-# pip install gymnasium[box2d]  (also requires: pip install swig)
-GYM_ENVS_BOX2D = [
-    'BipedalWalker-v3',
-    'BipedalWalkerHardcore-v3',
-    'CarRacing-v3',
-]
+        gym.register_envs(ale_py)
+        # frameskip=1: action repeat is handled here, like the other envs.
+        # Sticky actions (0.25) + full 18-action space, as in the DreamerV2 Atari setup.
+        self._env = gym.make(
+            env,
+            frameskip=1,
+            repeat_action_probability=0.25,
+            full_action_space=True,
+            render_mode="rgb_array",
+        )
+        self._seed = seed
+        self.max_episode_length = max_episode_length
+        self.action_repeat = action_repeat
 
-# pip install gymnasium[mujoco]
-GYM_ENVS_MUJOCO = [
-    'Ant-v5',
-    'HalfCheetah-v5',
-    'Hopper-v5',
-    'Humanoid-v5',
-    'HumanoidStandup-v5',
-    'InvertedDoublePendulum-v5',
-    'InvertedPendulum-v5',
-    'Pusher-v5',
-    'Reacher-v5',
-    'Swimmer-v5',
-    'Walker2d-v5',
-]
+    def reset(self) -> torch.Tensor:
+        self.t = 0
+        observation, _ = self._env.reset(seed=self._seed)
+        self._seed = None
+        return self._images_to_observation(observation)
 
-GYM_ENVS = GYM_ENVS_CLASSIC + GYM_ENVS_BOX2D + GYM_ENVS_MUJOCO
+    def step(self, action: torch.Tensor) -> tuple[torch.Tensor, float, bool, bool]:
+        action_index = int(action.reshape(-1, self.action_size).argmax(-1)[0])
+        reward = 0.0
+        terminated_flag = False
+        for _ in range(self.action_repeat):
+            observation, reward_k, terminated, truncated, _ = self._env.step(action_index)
+            reward += reward_k
+            self.t += 1
+            terminated_flag = terminated_flag or terminated
+            done = terminated or truncated or self.t == self.max_episode_length
+            if done:
+                break
+        return self._images_to_observation(observation), float(reward), done, terminated_flag
 
-#Environments that supports early termination
-TERMINATING_ENVS = {
-    'Hopper-v5', 'Walker2d-v5', 'Humanoid-v5', 'HumanoidStandup-v5',
-    'InvertedPendulum-v5', 'InvertedDoublePendulum-v5',
-    'BipedalWalker-v3', 'BipedalWalkerHardcore-v3', 'CarRacing-v3',
-    'MountainCarContinuous-v0',
-}
+    def render(self) -> None:
+        cv2.imshow("screen", self._env.render()[:, :, ::-1])
+        cv2.waitKey(1)
 
+    def render_frame(self, height: int = 480, width: int = 480) -> np.ndarray:
+        return cv2.resize(self._env.render(), (width, height), interpolation=cv2.INTER_NEAREST)
 
+    def close(self) -> None:
+        self._env.close()
 
+    @property
+    def observation_size(self) -> tuple[int, int, int]:
+        return (3, 64, 64)
 
-DMCONTROL_ENVS = [
-    'cartpole-balance', 'cartpole-balance-sparse',
-    'cartpole-swingup', 'cartpole-swingup-sparse',
-    'finger-spin', 'finger-turn-easy', 'finger-turn-hard',
-    'cheetah-run',
-    'reacher-easy', 'reacher-hard',
-    'cup-catch',
-    'walker-stand', 'walker-walk', 'walker-run',
-    'hopper-stand', 'hopper-hop',
-    'humanoid-stand', 'humanoid-walk', 'humanoid-run',
-]
+    @property
+    def action_size(self) -> int:
+        return int(self._env.action_space.n)
+
+    @property
+    def action_range(self) -> tuple[float, float]:
+        # One-hot actions live in [0, 1]; keeps the existing clamp in Dreamer.act a no-op.
+        return 0.0, 1.0
+
+    @property
+    def discrete_actions(self) -> bool:
+        return True
+
+    @property
+    def action_meanings(self) -> list[str]:
+        return self._env.unwrapped.get_action_meanings()
+
+    def sample_random_action(self) -> torch.Tensor:
+        action = torch.zeros(self.action_size)
+        action[np.random.randint(self.action_size)] = 1.0
+        return action
 
 
 def Env(env: str, seed: int, max_episode_length: int, action_repeat: int) -> BaseEnv:
@@ -244,5 +276,7 @@ def Env(env: str, seed: int, max_episode_length: int, action_repeat: int) -> Bas
         return GymEnv(env, seed, max_episode_length, action_repeat)
     elif env in DMCONTROL_ENVS:
         return DMControlEnv(env, seed, max_episode_length, action_repeat)
+    elif env in ATARI_ENVS:
+        return AtariEnv(env, seed, max_episode_length, action_repeat)
     else:
-        raise ValueError(f"Unknown environment: '{env}'. Must be one of GYM_ENVS or DMCONTROL_ENVS.")
+        raise ValueError(f"Unknown environment: '{env}'. Must be one of GYM_ENVS, DMCONTROL_ENVS or ATARI_ENVS.")

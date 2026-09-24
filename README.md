@@ -23,7 +23,7 @@ It keeps Dreamer v1's recipe — a **Recurrent State Space Model (RSSM)** that l
 
 This repo starts from the [Dreamer-v1-revisited](https://github.com/Farag-Y/Dreamer-v1-revisited) codebase — same RSSM, encoder, observation model, reward model, and latent-imagination actor-critic — and is being extended towards Dreamer v2's world model. Current state:
 
-- A **discount/continuation predictor** (`models/discount_model.py`) has been added to the world model and is used both to end imagined rollouts early and to bootstrap λ-returns for envs that can terminate early (see `TERMINATING_ENVS` in `env_wrapper.py`).
+- A **discount/continuation predictor** (`models/discount_model.py`) has been added to the world model and is used both to end imagined rollouts early and to bootstrap λ-returns for envs that can terminate early (see `TERMINATING_ENVS` in `env_registry.py`).
 - The RSSM's stochastic state is still a diagonal Gaussian trained with free-nats, as in Dreamer v1 — swapping it for Dreamer v2's categorical latents with KL balancing and straight-through gradients is the main piece of work still ahead.
 - The actor and critic are unchanged from Dreamer v1: a continuous, tanh-squashed Gaussian policy trained by backpropagating analytic gradients through imagined rollouts (rather than the reinforce-based estimator Dreamer v2 uses for discrete Atari actions), since this repo targets continuous-control benchmarks (MuJoCo, Box2D, dm_control) rather than Atari.
 
@@ -125,7 +125,7 @@ uv run python main.py env=cartpole-swingup
 uv run python main.py env=finger-turn-hard
 ```
 
-Environments with a natural early-termination signal (e.g. `Hopper-v5`, `BipedalWalker-v3`, `MountainCarContinuous-v0` — see `TERMINATING_ENVS` in `env_wrapper.py`) automatically enable the discount predictor during training.
+Environments with a natural early-termination signal (e.g. `Hopper-v5`, `BipedalWalker-v3`, `MountainCarContinuous-v0` — see `TERMINATING_ENVS` in `env_registry.py`) automatically enable the discount predictor during training.
 
 > **macOS note:** dm_control rendering uses mujoco's native CGL renderer and does not require a system OpenGL installation.
 

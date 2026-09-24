@@ -5,7 +5,7 @@ from torch.distributions import Independent, OneHotCategorical
 from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
 
-from env_wrapper import TERMINATING_ENVS
+from env_registry import TERMINATING_ENVS
 from models.discount_model import DiscountModel
 from models.encoder import Encoder
 from models.observation_model import ObservationModel

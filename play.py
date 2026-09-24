@@ -9,13 +9,16 @@ from env_wrapper import Env
 DISPLAY_SIZE = 480
 FOOTER_HEIGHT = 130
 
-# Key bindings per action dimension (positive key, negative key, label)
+# Continuous envs: key bindings per action dimension (positive key, negative key, label)
 KEY_BINDINGS = [
     (pygame.K_RIGHT, pygame.K_LEFT,  "← / →"),
     (pygame.K_UP,    pygame.K_DOWN,  "↑ / ↓"),
     (pygame.K_d,     pygame.K_a,     "A / D"),
     (pygame.K_w,     pygame.K_s,     "W / S"),
 ]
+
+# Discrete (Atari) envs: arrows = joystick, space = fire, combined into an ALE action name like 'UPRIGHTFIRE'
+ATARI_CONTROLS = "arrows: move   space: fire"
 
 
 def build_action(keys, action_size, action_min, action_max):
@@ -28,7 +31,18 @@ def build_action(keys, action_size, action_min, action_max):
     return torch.tensor(action).unsqueeze(0)
 
 
-def draw_overlay(surface, font, small_font, cfg_env, action, action_size, episode_reward, step):
+def build_discrete_action(keys, action_meanings):
+    vertical = "UP" if keys[pygame.K_UP] else "DOWN" if keys[pygame.K_DOWN] else ""
+    horizontal = "RIGHT" if keys[pygame.K_RIGHT] else "LEFT" if keys[pygame.K_LEFT] else ""
+    fire = "FIRE" if keys[pygame.K_SPACE] else ""
+    name = (vertical + horizontal + fire) or "NOOP"
+    index = action_meanings.index(name) if name in action_meanings else action_meanings.index("NOOP")
+    action = torch.zeros(1, len(action_meanings))
+    action[0, index] = 1.0
+    return action, action_meanings[index]
+
+
+def draw_footer(surface, font, small_font, cfg_env, episode_reward, step):
     overlay_rect = pygame.Rect(0, DISPLAY_SIZE, DISPLAY_SIZE, FOOTER_HEIGHT)
     pygame.draw.rect(surface, (20, 20, 20), overlay_rect)
     pygame.draw.line(surface, (60, 60, 60), (0, DISPLAY_SIZE), (DISPLAY_SIZE, DISPLAY_SIZE), 1)
@@ -43,7 +57,14 @@ def draw_overlay(surface, font, small_font, cfg_env, action, action_size, episod
 
     y += 30
     pygame.draw.line(surface, (50, 50, 50), (x, y), (DISPLAY_SIZE - x, y), 1)
-    y += 8
+
+    quit_text = small_font.render("Q quit   R reset", True, (100, 100, 100))
+    surface.blit(quit_text, (x, DISPLAY_SIZE + FOOTER_HEIGHT - 18))
+    return x, y + 8
+
+
+def draw_overlay(surface, font, small_font, cfg_env, action, action_size, episode_reward, step):
+    x, y = draw_footer(surface, font, small_font, cfg_env, episode_reward, step)
 
     for i in range(min(action_size, len(KEY_BINDINGS))):
         _, _, label = KEY_BINDINGS[i]
@@ -56,10 +77,13 @@ def draw_overlay(surface, font, small_font, cfg_env, action, action_size, episod
     if action_size > len(KEY_BINDINGS):
         note = small_font.render(f"(actions [{len(KEY_BINDINGS)}..{action_size-1}] = 0, no keys mapped)", True, (100, 100, 100))
         surface.blit(note, (x, y))
-        y += 18
 
-    quit_text = small_font.render("Q quit   R reset", True, (100, 100, 100))
-    surface.blit(quit_text, (x, DISPLAY_SIZE + FOOTER_HEIGHT - 18))
+
+def draw_discrete_overlay(surface, font, small_font, cfg_env, action_name, episode_reward, step):
+    x, y = draw_footer(surface, font, small_font, cfg_env, episode_reward, step)
+    color = (80, 80, 80) if action_name == "NOOP" else (80, 180, 80)
+    surface.blit(small_font.render(f"action  {action_name}", True, color), (x, y))
+    surface.blit(small_font.render(ATARI_CONTROLS, True, (100, 100, 100)), (x, y + 20))
 
 
 @hydra.main(config_path="conf", config_name="config", version_base=None)
@@ -68,15 +92,18 @@ def main(cfg: DictConfig) -> None:
               action_repeat=1)
 
     action_size = env.action_size
-    action_min, action_max = env.action_range
-
     print(f"\nPlaying: {cfg.env}")
-    print(f"Action dims: {action_size}  range: [{action_min:.2f}, {action_max:.2f}]")
-    for i in range(min(action_size, len(KEY_BINDINGS))):
-        _, _, label = KEY_BINDINGS[i]
-        print(f"  action[{i}]: {label}")
-    if action_size > len(KEY_BINDINGS):
-        print(f"  action[{len(KEY_BINDINGS)}..{action_size-1}]: unmapped (always 0)")
+    if env.discrete_actions:
+        action_meanings = env.action_meanings
+        print(f"Discrete actions: {action_size}  ({ATARI_CONTROLS})")
+    else:
+        action_min, action_max = env.action_range
+        print(f"Action dims: {action_size}  range: [{action_min:.2f}, {action_max:.2f}]")
+        for i in range(min(action_size, len(KEY_BINDINGS))):
+            _, _, label = KEY_BINDINGS[i]
+            print(f"  action[{i}]: {label}")
+        if action_size > len(KEY_BINDINGS):
+            print(f"  action[{len(KEY_BINDINGS)}..{action_size-1}]: unmapped (always 0)")
     print("  Q: quit   R: reset\n")
 
     pygame.init()
@@ -85,9 +112,9 @@ def main(cfg: DictConfig) -> None:
     font       = pygame.font.SysFont("monospace", 15, bold=True)
     small_font = pygame.font.SysFont("monospace", 13)
     clock = pygame.time.Clock()
+    fps = 60 if env.discrete_actions else 30  # Atari runs natively at 60 Hz
 
     obs = env.reset()
-    action = torch.zeros(1, action_size)
     episode_reward = 0.0
     step = 0
     running = True
@@ -106,7 +133,10 @@ def main(cfg: DictConfig) -> None:
                     step = 0
 
         keys = pygame.key.get_pressed()
-        action = build_action(keys, action_size, action_min, action_max)
+        if env.discrete_actions:
+            action, action_name = build_discrete_action(keys, action_meanings)
+        else:
+            action = build_action(keys, action_size, action_min, action_max)
 
         _, reward, done, _ = env.step(action)
         episode_reward += reward
@@ -121,9 +151,12 @@ def main(cfg: DictConfig) -> None:
         frame = env.render_frame(height=DISPLAY_SIZE, width=DISPLAY_SIZE)
         surf = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
         screen.blit(surf, (0, 0))
-        draw_overlay(screen, font, small_font, cfg.env, action, action_size, episode_reward, step)
+        if env.discrete_actions:
+            draw_discrete_overlay(screen, font, small_font, cfg.env, action_name, episode_reward, step)
+        else:
+            draw_overlay(screen, font, small_font, cfg.env, action, action_size, episode_reward, step)
         pygame.display.flip()
-        clock.tick(30)
+        clock.tick(fps)
 
     env.close()
     pygame.quit()

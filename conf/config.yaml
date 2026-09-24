@@ -2,7 +2,7 @@
 seed: 1
 
 # Environment
-env: finger-turn-hard
+env:  ALE/BankHeist-v5
 max_episode_length: 1000
 action_repeat: 2 ## Unlike planet, a constant action repeat for the chosen envs.
 imagination_horizon: 15
@@ -36,7 +36,7 @@ lam: 0.95
 learning_rate: 6e-4 #TODO: Revise on learning rate from paper
 actor_learning_rate: 8e-5
 critic_learning_rate: 1e-4
-critic_target_update_interval: 100  # hard-copy critic -> target critic every N train steps
+critic_target_update_interval: 100
 discount_model_gamma: 0.99
 discount_loss_scale: 10.0 #Only applied on termenating envs
 adam_epsilon: 1e-5

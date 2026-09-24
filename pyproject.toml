@@ -16,6 +16,7 @@ dependencies = [
     "pygame>=2.6.1",
     "matplotlib>=3.9.4",
     "boto3",
+    "ale-py>=0.12.1",
 ]
 
 [dependency-groups]

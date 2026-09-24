@@ -5,7 +5,7 @@ import torch
 from omegaconf import DictConfig
 from torch import nn, optim
 
-from env_wrapper import TERMINATING_ENVS
+from env_registry import TERMINATING_ENVS
 from models.actor_critic import Actor, Critic
 from models.discount_model import DiscountModel
 from models.reward_model import RewardModel

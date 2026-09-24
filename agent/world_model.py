@@ -105,7 +105,7 @@ class WorldModel(nn.Module):
             self.decoder, rssm_output.det_hidden_states, rssm_output.posterior_states, trailing_dims=1
         )
         obs_loss = 0.5 * F.mse_loss(decoded_obs, obs[1:], reduction="none").sum((2, 3, 4)).mean()
-        reward_loss = 0.5 * F.mse_loss(predicted_reward, rewards[:-1], reduction="none").mean()
+        reward_loss = 0.5 * F.mse_loss(predicted_reward, torch.tanh(rewards[:-1]), reduction="none").mean()
 
         total_loss = kl_loss + obs_loss + reward_loss + discount_loss
         loss_components = {

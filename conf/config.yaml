@@ -35,10 +35,11 @@ lam: 0.95
 # Optimisation
 learning_rate: 6e-4 #TODO: Revise on learning rate from paper
 actor_learning_rate: 8e-5
-critic_learning_rate: 8e-5
+critic_learning_rate: 1e-4
+critic_target_update_interval: 100  # hard-copy critic -> target critic every N train steps
 discount_model_gamma: 0.99
 discount_loss_scale: 10.0 #Only applied on termenating envs
-adam_epsilon: 1e-4
+adam_epsilon: 1e-5
 grad_clip_norm: 100
 
 # Losses
@@ -47,8 +48,7 @@ kl_scale: 0.1
 kl_balance_alpha: 0.8
 actor_grad_mix: 1.0  
 actor_entropy_scale: 1e-3
-# Action noise
-action_noise: 0.3
+
 
 # Hardware
 disable_cuda: false

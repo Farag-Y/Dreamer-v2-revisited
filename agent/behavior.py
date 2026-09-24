@@ -1,3 +1,4 @@
+import copy
 from typing import TYPE_CHECKING
 
 import torch
@@ -172,6 +173,11 @@ class ActorCritic(nn.Module):
             hidden_size=cfg.dense_hidden_size,
             non_linearity=cfg.dense_activation_function,
         ).to(device=device)
+
+        self.target_critic = copy.deepcopy(self.critic)
+        self.target_critic.requires_grad_(False)
+        self.critic_target_update_interval = cfg.critic_target_update_interval
+        self.critic_train_steps = 0
         self.actor_optim = optim.Adam(self.actor.parameters(), lr=cfg.actor_learning_rate, eps=cfg.adam_epsilon)
         self.critic_optim = optim.Adam(self.critic.parameters(), lr=cfg.critic_learning_rate, eps=cfg.adam_epsilon)
         self.discount_enabled = cfg.env in TERMINATING_ENVS
@@ -179,9 +185,6 @@ class ActorCritic(nn.Module):
     def act(self, belief: torch.Tensor, state: torch.Tensor, explore: bool) -> torch.Tensor:
         if explore:
             action = self.actor.sample(belief, state)
-            action = action + self.cfg.action_noise * torch.randn_like(
-                action
-            )  # TODO: Needs to be replaced with new method of maximizing entropy.
         else:
             action = self.actor.mode(belief, state)
         return action
@@ -203,7 +206,7 @@ class ActorCritic(nn.Module):
                 discount_model_gamma=cfg.discount_model_gamma,
                 discount_enabled=self.discount_enabled,
             )
-            v_lambda, values = _compute_vlambda(states, beliefs, rewards, discounts, self.critic, cfg.lam)
+            v_lambda, values = _compute_vlambda(states, beliefs, rewards, discounts, self.target_critic, cfg.lam)
 
         states_mid = states[:, 1:-1]
         beliefs_mid = beliefs[:, 1:-1]
@@ -211,7 +214,7 @@ class ActorCritic(nn.Module):
         outer_discount = _outer_discount(discounts)
 
         log_prob, entropy = _policy_terms(self.actor, beliefs_mid, states_mid, actions[:, 1:])
-        advantage = v_lambda_mid - values[:, 1:-1]  # baseline: critic V(s_t); TODO: target critic (Section 7)
+        advantage = v_lambda_mid - values[:, 1:-1]  # baseline: target critic V(s_t)
 
         self.actor_optim.zero_grad()
         a_loss = _actor_loss(
@@ -233,4 +236,7 @@ class ActorCritic(nn.Module):
         nn.utils.clip_grad_norm_(self.critic_optim.param_groups[0]["params"], cfg.grad_clip_norm)
         self.critic_optim.step()
 
+        self.critic_train_steps += 1
+        if self.critic_train_steps % self.critic_target_update_interval == 0:
+            self.target_critic.load_state_dict(self.critic.state_dict())
         return {"actor_loss": a_loss.item(), "critic_loss": c_loss.item(), "actor_entropy": entropy.mean().item()}

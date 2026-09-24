@@ -57,11 +57,13 @@ class Critic(nn.Module):
         self.fc1 = nn.Linear(belief_size + state_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, hidden_size)
-        self.fc4 = nn.Linear(hidden_size, 1)
+        self.fc4 = nn.Linear(hidden_size, hidden_size)
+        self.final_layer = nn.Linear(hidden_size, 1)
 
     def forward(self, belief: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
         hidden = self.act_fn(self.fc1(torch.concat((belief, state), dim=1)))
         hidden = self.act_fn(self.fc2(hidden))
         hidden = self.act_fn(self.fc3(hidden))
-        value = self.fc4(hidden)
+        hidden = self.act_fn(self.fc4(hidden))
+        value = self.final_layer(hidden)
         return value.squeeze(-1)

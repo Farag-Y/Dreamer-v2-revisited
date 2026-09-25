@@ -20,6 +20,7 @@ class WorldModel(nn.Module):
         self.cfg = cfg
         self.device = device
         self.train_discount = cfg.env in TERMINATING_ENVS
+        self.encoder = Encoder(cnn_depth=cfg.cnn_depth, image_channels=image_channels).to(device=device)
         self.rssm = RSSM(
             state_size=cfg.state_size,
             hidden_size=cfg.hidden_size,
@@ -27,13 +28,13 @@ class WorldModel(nn.Module):
             num_categorical=cfg.num_categorical,
             num_classes=cfg.num_classes,
             action_size=action_size,
-            obs_size=cfg.embedding_size,
+            obs_size=self.encoder.output_size,
             non_linearity=cfg.activation_function,
         ).to(device=device)
         self.decoder = ObservationModel(
             belief_size=cfg.belief_size,
             state_size=cfg.state_size,
-            embedding_size=cfg.embedding_size,
+            cnn_depth=cfg.cnn_depth,
             image_channels=image_channels,
         ).to(device=device)
         self.reward_model = RewardModel(
@@ -42,7 +43,6 @@ class WorldModel(nn.Module):
             hidden_size=cfg.dense_hidden_size,
             non_linearity=cfg.dense_activation_function,
         ).to(device=device)
-        self.encoder = Encoder(embedding_size=cfg.embedding_size, image_channels=image_channels).to(device=device)
         self.discount_model = DiscountModel(
             state_size=cfg.state_size,
             belief_size=cfg.belief_size,

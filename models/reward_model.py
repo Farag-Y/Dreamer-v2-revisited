@@ -16,9 +16,13 @@ class RewardModel(nn.Module):
     self.hidden_size= hidden_size
     self.fc1 = nn.Linear(belief_size+state_size,hidden_size)
     self.fc2 = nn.Linear(hidden_size,hidden_size)
-    self.fc3 = nn.Linear(hidden_size,1)
+    self.fc3 = nn.Linear(hidden_size,hidden_size)
+    self.fc4 = nn.Linear(hidden_size,hidden_size)
+    self.final_layer = nn.Linear(hidden_size,1)
   def forward(self, belief: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
     hidden = self.act_fn(self.fc1(torch.concat((belief,state),dim=1)))
     hidden = self.act_fn(self.fc2(hidden))
-    reward = self.fc3(hidden).squeeze(dim=1)
+    hidden = self.act_fn(self.fc3(hidden))
+    hidden = self.act_fn(self.fc4(hidden))
+    reward = self.final_layer(hidden).squeeze(dim=1)
     return reward

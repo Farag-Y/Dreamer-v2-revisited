@@ -196,49 +196,58 @@ class DMControlEnv(BaseEnv):
 
 
 class AtariEnv(BaseEnv):
+    # DreamerV2 Atari setup: sticky actions (0.25), full 18-action space, no life-loss termination,
+    # 30 random no-ops at reset, max-pool over the last two frames, grayscale 64x64 observations.
+    # Actions come in as one-hot vectors and are converted to the integer ALE action.
     def __init__(self, env: str, seed: int, max_episode_length: int, action_repeat: int) -> None:
         import ale_py
         import gymnasium as gym
+        from gymnasium.wrappers import AtariPreprocessing
 
         gym.register_envs(ale_py)
-        # frameskip=1: action repeat is handled here, like the other envs.
-        # Sticky actions (0.25) + full 18-action space, as in the DreamerV2 Atari setup.
-        self._env = gym.make(
+        base_env = gym.make(
             env,
-            frameskip=1,
+            frameskip=1,  # action repeat is done by AtariPreprocessing (frame_skip) below
             repeat_action_probability=0.25,
             full_action_space=True,
             render_mode="rgb_array",
+        )
+        self._env = AtariPreprocessing(
+            base_env,
+            noop_max=30,
+            frame_skip=action_repeat,
+            screen_size=64,
+            terminal_on_life_loss=False,
+            grayscale_obs=True,
         )
         self._seed = seed
         self.max_episode_length = max_episode_length
         self.action_repeat = action_repeat
 
+    def _to_observation(self, frame: np.ndarray) -> torch.Tensor:
+        observation = torch.tensor(frame, dtype=torch.float32).unsqueeze(0)  # (1, 64, 64)
+        preprocess_observation_(observation)
+        return observation.unsqueeze(dim=0)
+
     def reset(self) -> torch.Tensor:
         self.t = 0
-        observation, _ = self._env.reset(seed=self._seed)
+        frame, _ = self._env.reset(seed=self._seed)
         self._seed = None
-        return self._images_to_observation(observation)
+        return self._to_observation(frame)
 
     def step(self, action: torch.Tensor) -> tuple[torch.Tensor, float, bool, bool]:
         action_index = int(action.reshape(-1, self.action_size).argmax(-1)[0])
-        reward = 0.0
-        terminated_flag = False
-        for _ in range(self.action_repeat):
-            observation, reward_k, terminated, truncated, _ = self._env.step(action_index)
-            reward += reward_k
-            self.t += 1
-            terminated_flag = terminated_flag or terminated
-            done = terminated or truncated or self.t == self.max_episode_length
-            if done:
-                break
-        return self._images_to_observation(observation), float(reward), done, terminated_flag
+        frame, reward, terminated, truncated, _ = self._env.step(action_index)  # repeats action_repeat frames
+        self.t += self.action_repeat  # t counts raw frames, like the other envs
+        done = terminated or truncated or self.t >= self.max_episode_length
+        return self._to_observation(frame), float(reward), done, terminated
 
     def render(self) -> None:
         cv2.imshow("screen", self._env.render()[:, :, ::-1])
         cv2.waitKey(1)
 
     def render_frame(self, height: int = 480, width: int = 480) -> np.ndarray:
+        # Full-resolution RGB frame for display/videos, independent of the grayscale observation.
         return cv2.resize(self._env.render(), (width, height), interpolation=cv2.INTER_NEAREST)
 
     def close(self) -> None:
@@ -246,7 +255,7 @@ class AtariEnv(BaseEnv):
 
     @property
     def observation_size(self) -> tuple[int, int, int]:
-        return (3, 64, 64)
+        return (1, 64, 64)
 
     @property
     def action_size(self) -> int:
@@ -254,8 +263,7 @@ class AtariEnv(BaseEnv):
 
     @property
     def action_range(self) -> tuple[float, float]:
-        # One-hot actions live in [0, 1]; keeps the existing clamp in Dreamer.act a no-op.
-        return 0.0, 1.0
+        raise NotImplementedError("Atari actions are discrete one-hot vectors; there is no continuous range.")
 
     @property
     def discrete_actions(self) -> bool:

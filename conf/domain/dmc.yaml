@@ -1,0 +1,5 @@
+# @package _global_
+# DeepMind Control Suite / continuous-control Gym tasks.
+env: finger-turn-hard
+action_repeat: 2
+max_episode_length: 1000  # raw env steps

@@ -1,0 +1,5 @@
+# @package _global_
+# Atari (DreamerV2 setup). Pick a game with env=ALE/<Game>-v5, see ATARI_GAMES in env_registry.py.
+env: ALE/BankHeist-v5
+action_repeat: 4
+max_episode_length: 108000  # raw frames (= 27000 agent steps at action_repeat 4, the standard 30-min cap)

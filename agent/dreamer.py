@@ -21,7 +21,9 @@ class Dreamer(torch.nn.Module):
 
     @classmethod
     def from_config(cls, cfg: DictConfig, env: BaseEnv, device: str) -> "Dreamer":
-        world_model = WorldModel(cfg, action_size=env.action_size, device=device)
+        world_model = WorldModel(
+            cfg, action_size=env.action_size, image_channels=env.observation_size[0], device=device
+        )
         behavior = ActorCritic(cfg, action_size=env.action_size, device=device)
         return cls(world_model, behavior, cfg, env.action_size, device)
 
@@ -40,8 +42,9 @@ class Dreamer(torch.nn.Module):
             belief = rssm_out.det_hidden_states[-1]
             state = rssm_out.posterior_states[-1]
             action = self.behavior.act(belief, state, explore)
-            min_action, max_action = env.action_range
-            action = action.clamp(min_action, max_action)
+            if not env.discrete_actions:  # one-hot discrete actions need no clamping
+                min_action, max_action = env.action_range
+                action = action.clamp(min_action, max_action)
             next_obs, reward, done, terminated = env.step(action[0].cpu())
         return belief, state, action, next_obs, reward, done, terminated
 

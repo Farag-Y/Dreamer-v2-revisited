@@ -15,7 +15,7 @@ from utils import model_wrapper
 
 
 class WorldModel(nn.Module):
-    def __init__(self, cfg: DictConfig, action_size: int, device: str) -> None:
+    def __init__(self, cfg: DictConfig, action_size: int, image_channels: int, device: str) -> None:
         super().__init__()
         self.cfg = cfg
         self.device = device
@@ -34,6 +34,7 @@ class WorldModel(nn.Module):
             belief_size=cfg.belief_size,
             state_size=cfg.state_size,
             embedding_size=cfg.embedding_size,
+            image_channels=image_channels,
         ).to(device=device)
         self.reward_model = RewardModel(
             belief_size=cfg.belief_size,
@@ -41,7 +42,7 @@ class WorldModel(nn.Module):
             hidden_size=cfg.dense_hidden_size,
             non_linearity=cfg.dense_activation_function,
         ).to(device=device)
-        self.encoder = Encoder(embedding_size=cfg.embedding_size).to(device=device)
+        self.encoder = Encoder(embedding_size=cfg.embedding_size, image_channels=image_channels).to(device=device)
         self.discount_model = DiscountModel(
             state_size=cfg.state_size,
             belief_size=cfg.belief_size,

@@ -9,12 +9,11 @@ seed: 1
 imagination_horizon: 15
 
 # Training
+# prefill_steps, experience_size and train_every are per domain (conf/domain/)
 episodes: 3000
-seed_episodes: 5
-collect_interval: 100
+pretrain_updates: 100  # gradient updates right after prefill, before the first collected episode
 batch_size: 50
 chunk_size: 50
-experience_size: 100000
 
 # Model
 embedding_size: 1024
@@ -38,7 +37,6 @@ learning_rate: 6e-4 #TODO: Revise on learning rate from paper
 actor_learning_rate: 8e-5
 critic_learning_rate: 1e-4
 critic_target_update_interval: 100
-discount_model_gamma: 0.99
 discount_loss_scale: 10.0 #Only applied on termenating envs
 adam_epsilon: 1e-5
 grad_clip_norm: 100
@@ -58,6 +56,7 @@ disable_cuda: false
 test: false
 test_interval: 25
 test_episodes: 10
+video_size: 160  # test videos are rendered at video_size x video_size; video_frame_skip is per domain
 
 # Checkpointing
 checkpoint_interval: 25

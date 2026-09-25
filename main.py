@@ -33,11 +33,14 @@ def _run_test_episode(cfg: DictConfig, env: BaseEnv, dreamer: Dreamer) -> tuple[
     state  = torch.zeros(1, cfg.state_size,  device=dreamer.device)
     action = torch.zeros(1, env.action_size, device=dreamer.device)
     episode_reward, frames = 0.0, []
-    for _ in range(cfg.max_episode_length // cfg.action_repeat):
+    max_steps = cfg.max_episode_length // cfg.action_repeat
+    for step in range(max_steps):
         belief, state, action, observation, reward, done, _ = dreamer.act(
             env, observation, belief, state, action, explore=False)
         episode_reward += reward
-        frames.append(env.render_frame())
+        # Small frames, every video_frame_skip-th step (Atari episodes can be 27000 steps); always keep the last one.
+        if step % cfg.video_frame_skip == 0 or done or step == max_steps - 1:
+            frames.append(env.render_frame(height=cfg.video_size, width=cfg.video_size))
         if done:
             break
     return episode_reward, frames
@@ -65,10 +68,14 @@ def test(cfg: DictConfig, dreamer: Dreamer, env: BaseEnv,
 
 def train(cfg: DictConfig, dreamer: Dreamer, experience_replay: ExperienceReplay,
           metrics: Metrics, env: BaseEnv, results_dir: str, r2_prefix: str = "") -> None:
+    # One gradient update per train_every collected steps: each round trains on the data collected since the last.
+    num_updates, trained_steps = cfg.pretrain_updates, experience_replay.steps
     for episode in tqdm(range(metrics.last_episode + 1, cfg.episodes + 1), total=cfg.episodes, initial=metrics.last_episode):
-        results = [dreamer.train_on_batch(experience_replay) for _ in tqdm(range(cfg.collect_interval))]
+        results = [dreamer.train_on_batch(experience_replay) for _ in tqdm(range(num_updates))]
         metrics.record(results)
         episode_reward = dreamer.collect_episode(env, experience_replay, explore=True)
+        num_updates = max(1, (experience_replay.steps - trained_steps) // cfg.train_every)
+        trained_steps += num_updates * cfg.train_every
         metrics.episodes.append(episode)
         metrics.train_rewards.append(episode_reward)
         prev_env_steps = metrics.train_env_steps[-1] if metrics.train_env_steps else metrics.last_step

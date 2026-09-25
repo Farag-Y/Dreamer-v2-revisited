@@ -3,3 +3,12 @@
 env: ALE/BankHeist-v5
 action_repeat: 4
 max_episode_length: 108000  # raw frames (= 27000 agent steps at action_repeat 4, the standard 30-min cap)
+
+# Data collection / training schedule (all counted in agent steps, i.e. after action repeat)
+prefill_steps: 50000       # random-policy steps collected before training starts
+experience_size: 2000000   # replay capacity; ~8 GB of RAM at 64x64 grayscale uint8
+train_every: 16            # one gradient update per N collected steps
+
+discount_model_gamma: 0.995
+
+video_frame_skip: 4        # keep every N-th step in test videos (episodes can be up to 27000 steps)

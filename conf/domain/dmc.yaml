@@ -3,3 +3,11 @@
 env: finger-turn-hard
 action_repeat: 2
 max_episode_length: 1000  # raw env steps
+
+prefill_steps: 2500 
+experience_size: 100000
+train_every: 5
+
+discount_model_gamma: 0.99
+
+video_frame_skip: 1

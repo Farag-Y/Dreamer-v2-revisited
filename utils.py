@@ -62,7 +62,7 @@ def collect_observations(cfg: DictConfig, device: str, env: BaseEnv, metrics: Me
         action_size=env.action_size,
         device=device,
     )
-    for s in range(1, cfg.seed_episodes + 1):
+    while experience_replay.steps < cfg.prefill_steps:  # whole episodes, so the last one may overshoot
         observation = env.reset()
         done = False
         while not done:

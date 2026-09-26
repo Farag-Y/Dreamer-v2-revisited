@@ -7,7 +7,13 @@ max_episode_length: 1000  # raw env steps
 prefill_steps: 2500 
 experience_size: 100000
 train_every: 5
+pretrain_updates: 100
 
 discount_model_gamma: 0.99
+
+# Losses (V2 continuous-control values)
+kl_scale: 1.0
+actor_grad_mix: 0.0
+actor_entropy_scale: 1e-4
 
 video_frame_skip: 1

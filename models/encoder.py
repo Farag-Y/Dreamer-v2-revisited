@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 
 class Encoder(nn.Module):
-   def __init__(self, cnn_depth: int, image_channels: int = 3, non_linearity: str = 'relu') -> None:
+  def __init__(self, cnn_depth: int, image_channels: int = 3, non_linearity: str = 'relu') -> None:
     super().__init__()
     self.act_fn = getattr(F, non_linearity)
     self.output_size = 32 * cnn_depth

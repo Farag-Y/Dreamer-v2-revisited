@@ -178,8 +178,11 @@ class ActorCritic(nn.Module):
         self.target_critic.requires_grad_(False)
         self.critic_target_update_interval = cfg.critic_target_update_interval
         self.critic_train_steps = 0
-        self.actor_optim = optim.Adam(self.actor.parameters(), lr=cfg.actor_learning_rate, eps=cfg.adam_epsilon)
-        self.critic_optim = optim.Adam(self.critic.parameters(), lr=cfg.critic_learning_rate, eps=cfg.adam_epsilon)
+        # AdamW decays by lr * wd; divide by lr so each step is w *= (1 - weight_decay), as in the reference
+        self.actor_optim = optim.AdamW(self.actor.parameters(), lr=cfg.actor_learning_rate, eps=cfg.adam_epsilon,
+                                       weight_decay=cfg.weight_decay / cfg.actor_learning_rate)
+        self.critic_optim = optim.AdamW(self.critic.parameters(), lr=cfg.critic_learning_rate, eps=cfg.adam_epsilon,
+                                        weight_decay=cfg.weight_decay / cfg.critic_learning_rate)
         self.discount_enabled = cfg.env in TERMINATING_ENVS
 
     def act(self, belief: torch.Tensor, state: torch.Tensor, explore: bool) -> torch.Tensor:

@@ -49,7 +49,9 @@ class WorldModel(nn.Module):
             hidden_size=cfg.dense_hidden_size,
             non_linearity=cfg.dense_activation_function,
         ).to(device=device)
-        self.optimizer = optim.Adam(self.parameters(), lr=cfg.learning_rate, eps=cfg.adam_epsilon)
+        # AdamW decays by lr * wd; divide by lr so each step is w *= (1 - weight_decay), as in the reference
+        self.optimizer = optim.AdamW(self.parameters(), lr=cfg.learning_rate, eps=cfg.adam_epsilon,
+                                     weight_decay=cfg.weight_decay / cfg.learning_rate)
 
     def observe(
         self,

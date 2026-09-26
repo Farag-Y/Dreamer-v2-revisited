@@ -9,10 +9,9 @@ seed: 1
 imagination_horizon: 15
 
 # Training
-# prefill_steps, experience_size and train_every are per domain (conf/domain/)
 episodes: 3000
-pretrain_updates: 100  # gradient updates right after prefill, before the first collected episode
-batch_size: 50
+# Reference code: batch 16 with train_every 16 (Atari). The paper uses batch 50 with one update per 4 steps.
+batch_size: 16
 chunk_size: 50
 
 # Model
@@ -29,20 +28,19 @@ lam: 0.95
 
 
 # Optimisation
-learning_rate: 6e-4 #TODO: Revise on learning rate from paper
-actor_learning_rate: 8e-5
+learning_rate: 2e-4
+actor_learning_rate: 4e-5
 critic_learning_rate: 1e-4
 critic_target_update_interval: 100
-discount_loss_scale: 10.0 #Only applied on termenating envs
+discount_loss_scale: 5.0  # only applied on terminating envs; reference Atari loss_scales.discount
 adam_epsilon: 1e-5
+weight_decay: 1e-6  # decoupled, not lr-scaled, all params (reference Optimizer._apply_weight_decay)
 grad_clip_norm: 100
 
 # Losses
 free_nats: 0.0
-kl_scale: 0.1
+# kl_scale, actor_grad_mix and actor_entropy_scale are per domain (conf/domain/)
 kl_balance_alpha: 0.8
-actor_grad_mix: 1.0  
-actor_entropy_scale: 1e-3
 
 
 # Hardware

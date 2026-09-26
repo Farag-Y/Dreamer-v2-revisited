@@ -21,11 +21,16 @@ It keeps Dreamer v1's recipe — a **Recurrent State Space Model (RSSM)** that l
 
 ## This Re-implementation
 
-This repo starts from the [Dreamer-v1-revisited](https://github.com/Farag-Y/Dreamer-v1-revisited) codebase — same RSSM, encoder, observation model, reward model, and latent-imagination actor-critic — and is being extended towards Dreamer v2's world model. Current state:
+This repo starts from the [Dreamer-v1-revisited](https://github.com/Farag-Y/Dreamer-v1-revisited) codebase and has been migrated to Dreamer v2's Atari setup. Current state:
 
-- A **discount/continuation predictor** (`models/discount_model.py`) has been added to the world model and is used both to end imagined rollouts early and to bootstrap λ-returns for envs that can terminate early (see `TERMINATING_ENVS` in `env_registry.py`).
-- The RSSM's stochastic state is still a diagonal Gaussian trained with free-nats, as in Dreamer v1 — swapping it for Dreamer v2's categorical latents with KL balancing and straight-through gradients is the main piece of work still ahead.
-- The actor and critic are unchanged from Dreamer v1: a continuous, tanh-squashed Gaussian policy trained by backpropagating analytic gradients through imagined rollouts (rather than the reinforce-based estimator Dreamer v2 uses for discrete Atari actions), since this repo targets continuous-control benchmarks (MuJoCo, Box2D, dm_control) rather than Atari.
+- **Categorical latents:** the RSSM's stochastic state is 32 categorical variables with 32 classes each, sampled as one-hot vectors with straight-through gradients.
+- **KL balancing:** the KL term is split into a prior and a posterior term weighted 0.8 / 0.2 and scaled by `kl_scale`; free nats are disabled.
+- **Discount predictor:** `models/discount_model.py` predicts episode continuation; it ends imagined rollouts early and weights the λ-returns on envs that can terminate (all Atari games, see `TERMINATING_ENVS` in `env_registry.py`).
+- **Reward head** regresses to `tanh(reward)`.
+- **Actor-critic:** a categorical actor over the discrete Atari actions, trained with Reinforce against a critic baseline plus an entropy bonus; the critic is trained against a target network that is hard-copied every 100 updates.
+- **Model size and hyperparameters** follow the Dreamer v2 Atari setup (world model ~20M parameters, AdamW with decoupled weight decay, batch 16 × 50 as in the official code).
+
+Known gaps: the discount model does not yet see terminal states, training updates run after each episode instead of during it, and the `dmc` domain still needs a continuous actor (it runs, but its results are meaningless).
 
 Other goals, unchanged from the v1 repo:
 
@@ -33,7 +38,7 @@ Other goals, unchanged from the v1 repo:
 - Modern Python tooling: [uv](https://docs.astral.sh/uv/) for environment management, [Hydra](https://hydra.cc) for configuration.
 - Modular layout: each model component (RSSM, encoder, observation model, reward model, discount model, actor/critic) lives in its own file under `models/`.
 - Uses `gymnasium` (the maintained fork of OpenAI Gym) instead of the original `gym`.
-- Supports `dm_control` environments alongside gymnasium.
+- Supports Atari via `ale-py`, plus `dm_control` and gymnasium environments.
 
 It does **not** aim to reproduce the exact benchmark numbers from the paper.
 
@@ -44,7 +49,10 @@ It does **not** aim to reproduce the exact benchmark numbers from the paper.
 ```
 Dreamer-v2-revisited/
 ├── conf/
-│   └── config.yaml         # All hyperparameters via Hydra
+│   ├── config.yaml         # Shared hyperparameters via Hydra
+│   └── domain/
+│       ├── atari.yaml      # Atari settings (default)
+│       └── dmc.yaml        # Continuous-control settings
 ├── models/
 │   ├── rssm.py              # Recurrent State Space Model (world model)
 │   ├── encoder.py
@@ -56,12 +64,16 @@ Dreamer-v2-revisited/
 │   ├── world_model.py       # World model training loss (KL, image, reward, discount)
 │   ├── behavior.py           # Imagined rollouts + actor-critic training
 │   └── dreamer.py            # Ties world model + behavior together, env interaction loop
-├── env_wrapper.py            # Gymnasium + dm_control wrappers (image preprocessing)
+├── env_wrapper.py            # Atari, Gymnasium and dm_control wrappers (image preprocessing)
+├── env_registry.py           # Supported env names and TERMINATING_ENVS
 ├── experience_replay.py      # Replay buffer
 ├── checkpoint.py             # Checkpointing
+├── metrics.py                # Per-episode training metrics
+├── visualization.py          # metrics.png plots and test videos
 ├── cloud_storage.py          # Cloudflare R2 upload/listing helpers
 ├── main.py                   # Training entry point
 ├── play.py                   # Manual keyboard control of any supported env
+├── scripts/                  # Vast.ai training and R2 cleanup helpers
 └── utils.py
 ```
 
@@ -90,42 +102,38 @@ uv run python main.py
 Override any config value inline:
 
 ```bash
-uv run python main.py env=HalfCheetah-v5 seed=42
+uv run python main.py env=ALE/Pong-v5 seed=42
 ```
+
+The `domain` config group picks the environment family and its settings (action repeat, episode length, replay size, training schedule, loss scales). It defaults to `atari`; switch with `domain=dmc`.
 
 ---
 
 ## Environments
 
-Two environment families are supported. Set `env` in `conf/config.yaml` or via the command line.
-
-**Gymnasium** — install with `uv sync` (included by default):
-
-| Category | Examples |
-|---|---|
-| Classic Control | `Pendulum-v1`, `MountainCarContinuous-v0` |
-| Box2D | `BipedalWalker-v3`, `BipedalWalkerHardcore-v3`, `CarRacing-v3` |
-| MuJoCo | `HalfCheetah-v5`, `Hopper-v5`, `Walker2d-v5`, `Ant-v5`, `Humanoid-v5`, ... |
-
-**dm_control** — also included by default:
-
-| Environment | dm_control task |
-|---|---|
-| `cartpole-swingup` | Cartpole swingup from hanging position |
-| `finger-spin` / `finger-turn-easy` / `finger-turn-hard` | Robotic finger spinning / turning a body |
-| `cheetah-run` | Half-cheetah running |
-| `reacher-easy` / `reacher-hard` | 2-link arm reaching |
-| `cup-catch` | Ball-in-cup |
-| `walker-stand` / `walker-walk` / `walker-run` | Bipedal walker |
-| `hopper-stand` / `hopper-hop` | Hopping leg |
-| `humanoid-stand` / `humanoid-walk` / `humanoid-run` | Humanoid locomotion |
+**Atari (default)** — installed with `uv sync` via `ale-py` (ROMs included). Any of the 55 games in the Dreamer v2 benchmark (`ATARI_GAMES` in `env_registry.py`) can be selected as `ALE/<Game>-v5`:
 
 ```bash
-uv run python main.py env=cartpole-swingup
-uv run python main.py env=finger-turn-hard
+uv run python main.py env=ALE/Pong-v5
+uv run python main.py env=ALE/Breakout-v5
 ```
 
-Environments with a natural early-termination signal (e.g. `Hopper-v5`, `BipedalWalker-v3`, `MountainCarContinuous-v0` — see `TERMINATING_ENVS` in `env_registry.py`) automatically enable the discount predictor during training.
+Observations are 64×64 grayscale with an action repeat of 4, sticky actions, up to 30 no-ops at reset and the full 18-action set. Episodes are capped at 108,000 frames (27,000 agent steps).
+
+**Continuous control** (`domain=dmc`) — gymnasium and dm_control envs are still supported by the wrappers, but until the continuous actor is back, training on them is not meaningful.
+
+| Family | Examples |
+|---|---|
+| Gymnasium Classic Control | `Pendulum-v1`, `MountainCarContinuous-v0` |
+| Gymnasium Box2D | `BipedalWalker-v3`, `BipedalWalkerHardcore-v3`, `CarRacing-v3` |
+| Gymnasium MuJoCo | `HalfCheetah-v5`, `Hopper-v5`, `Walker2d-v5`, `Ant-v5`, `Humanoid-v5`, ... |
+| dm_control | `cartpole-swingup`, `finger-spin`, `finger-turn-hard`, `cheetah-run`, `walker-walk`, `humanoid-run`, ... |
+
+```bash
+uv run python main.py domain=dmc env=cartpole-swingup
+```
+
+Environments with a natural termination signal (all Atari games, and e.g. `Hopper-v5` or `BipedalWalker-v3`; see `TERMINATING_ENVS` in `env_registry.py`) automatically enable the discount predictor during training.
 
 > **macOS note:** dm_control rendering uses mujoco's native CGL renderer and does not require a system OpenGL installation.
 
@@ -136,11 +144,15 @@ Environments with a natural early-termination signal (e.g. `Hopper-v5`, `Bipedal
 `play.py` lets you control any supported environment yourself using the keyboard. Useful for getting a feel for an environment before training.
 
 ```bash
-uv run python play.py env=Pendulum-v1
-uv run python play.py env=cartpole-swingup
+uv run python play.py env=ALE/Pong-v5
+uv run python play.py domain=dmc env=cartpole-swingup
 ```
 
-A pygame window opens showing the environment at full resolution. Key bindings are displayed as an overlay at the bottom of the window and printed to the terminal on startup. Up to 4 action dimensions are mapped:
+A pygame window opens showing the environment at full resolution. Key bindings are displayed as an overlay at the bottom of the window and printed to the terminal on startup.
+
+For Atari games, the arrow keys move and `Space` fires; combinations such as up-right-fire map to the matching Atari action.
+
+For continuous envs, up to 4 action dimensions are mapped:
 
 | Keys | Action dim |
 |---|---|
@@ -150,6 +162,18 @@ A pygame window opens showing the environment at full resolution. Key bindings a
 | `W` / `S` | action\[3\] |
 
 Hold a key to push the action to its maximum; release to return to zero. `R` resets the episode, `Q` quits.
+
+---
+
+## Training Outputs
+
+Each run writes to `results/<timestamp>/`. After every episode, `metrics.png` is refreshed with the world-model losses (KL, observation, reward, discount), the actor and critic losses, train and test rewards, and three diagnostics:
+
+- **KL (unscaled):** the raw KL between posterior and prior, before `kl_scale`.
+- **Latent entropy:** the entropy of the prior and the posterior. With KL balancing working, the prior should become more certain over training without the posterior collapsing.
+- **Actor entropy:** how random the policy still is; a fast drop to zero means exploration has collapsed.
+
+Every `test_interval` episodes, `test_episodes` evaluation episodes run and are saved next to the plot as videos, plus a PNG of each final frame. `test: true` runs evaluation only, without training.
 
 ---
 
@@ -194,7 +218,7 @@ The script walks you through four interactive prompts:
 | GPU type | RTX 3060, RTX 4090, RTX 3090, A100 SXM4 80GB, H100 NVL, A6000 |
 | CUDA version | 12.1 or 12.4 |
 | Entrypoint | full training run or evaluation only |
-| Extra Hydra overrides | e.g. `env=HalfCheetah-v5 seed=42` |
+| Extra Hydra overrides | e.g. `env=ALE/Pong-v5 seed=42` |
 | Max price per hour | e.g. `0.50` |
 
 It then lists the matching offers (sorted by price) and lets you pick one. A confirmation prompt is shown before any money is spent.

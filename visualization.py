@@ -6,7 +6,7 @@ from metrics import Metrics
 
 
 def plot_metrics(metrics: Metrics, results_dir: str) -> None:
-    fig, axes = plt.subplots(3, 3, figsize=(18, 12))
+    fig, axes = plt.subplots(4, 3, figsize=(18, 16))
     fig.suptitle(f'Training Metrics — Episode {metrics.last_episode}')
 
     if metrics.kl_loss:
@@ -58,6 +58,23 @@ def plot_metrics(metrics: Metrics, results_dir: str) -> None:
         axes[2, 2].set_xlabel('Environment Steps')
     else:
         axes[2, 2].axis('off')
+
+    if metrics.kl:
+        axes[3, 0].plot(metrics.kl)
+        axes[3, 0].set_title('KL (unscaled)')
+        axes[3, 0].set_xlabel('Episode')
+
+    if metrics.prior_entropy:
+        axes[3, 1].plot(metrics.prior_entropy, label='prior')
+        axes[3, 1].plot(metrics.post_entropy, label='posterior')
+        axes[3, 1].set_title('Latent Entropy')
+        axes[3, 1].set_xlabel('Episode')
+        axes[3, 1].legend()
+
+    if metrics.actor_entropy:
+        axes[3, 2].plot(metrics.actor_entropy)
+        axes[3, 2].set_title('Actor Entropy')
+        axes[3, 2].set_xlabel('Episode')
 
     plt.tight_layout()
     plt.savefig(os.path.join(results_dir, 'metrics.png'))

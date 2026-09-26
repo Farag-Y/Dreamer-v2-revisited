@@ -89,6 +89,7 @@ class WorldModel(nn.Module):
         prior_dist_detached = Independent(OneHotCategorical(logits=rssm_output.prior_logits.detach()), 1)
         prior_kl_term = kl_divergence(post_dist_detached, prior_dist).mean()
         post_kl_term = kl_divergence(post_dist, prior_dist_detached).mean()
+        kl_value = prior_kl_term.item()
         prior_kl_term = torch.max(prior_kl_term, free_nats.squeeze())
         post_kl_term = torch.max(post_kl_term, free_nats.squeeze())
         kl_loss = cfg.kl_scale * (cfg.kl_balance_alpha * prior_kl_term + (1 - cfg.kl_balance_alpha) * post_kl_term)
@@ -113,6 +114,9 @@ class WorldModel(nn.Module):
         total_loss = kl_loss + obs_loss + reward_loss + discount_loss
         loss_components = {
             "kl_loss": kl_loss.item(),
+            "kl": kl_value,
+            "prior_entropy": prior_dist_detached.entropy().mean().item(),
+            "post_entropy": post_dist_detached.entropy().mean().item(),
             "obs_loss": obs_loss.item(),
             "reward_loss": reward_loss.item(),
             "discount_loss": discount_loss.item(),

@@ -14,9 +14,13 @@ class Metrics:
     observation_loss: list[float]       = field(default_factory=list)
     reward_loss:      list[float]       = field(default_factory=list)
     kl_loss:              list[float]       = field(default_factory=list)
+    kl:                   list[float]       = field(default_factory=list)
+    prior_entropy:        list[float]       = field(default_factory=list)
+    post_entropy:         list[float]       = field(default_factory=list)
     discount_loss:        list[float]       = field(default_factory=list)
     actor_loss:           list[float]       = field(default_factory=list)
     critic_loss:          list[float]       = field(default_factory=list)
+    actor_entropy:        list[float]       = field(default_factory=list)
 
     @property
     def last_episode(self) -> int:
@@ -29,11 +33,15 @@ class Metrics:
     def record(self, results: list[dict]) -> None:
         n = len(results)
         self.kl_loss.append(sum(r['kl_loss'] for r in results) / n)
+        self.kl.append(sum(r['kl'] for r in results) / n)
+        self.prior_entropy.append(sum(r['prior_entropy'] for r in results) / n)
+        self.post_entropy.append(sum(r['post_entropy'] for r in results) / n)
         self.observation_loss.append(sum(r['obs_loss'] for r in results) / n)
         self.reward_loss.append(sum(r['reward_loss'] for r in results) / n)
         self.discount_loss.append(sum(r['discount_loss'] for r in results) / n)
         self.actor_loss.append(sum(r['actor_loss'] for r in results) / n)
         self.critic_loss.append(sum(r['critic_loss'] for r in results) / n)
+        self.actor_entropy.append(sum(r['actor_entropy'] for r in results) / n)
 
     def save(self, path: str) -> None:
         torch.save(self, path)

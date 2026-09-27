@@ -58,6 +58,9 @@ def upload_experience_replay(cfg: DictConfig, local_path: str, episode: int, pre
     client = get_client()
     key = f"{prefix}/experience_replay_{episode}.pt"
     _upload_file(client, local_path, cfg.r2_bucket, key)
+    replays = list_experience_replay_episodes(client, cfg.r2_bucket, prefix)
+    older = [obj["Key"] for ep, obj in replays.items() if ep != episode]
+    delete_keys(client, cfg.r2_bucket, older)
 
 
 def download_checkpoint(cfg: DictConfig, episode: int, dest_dir: str, prefix: str) -> None:

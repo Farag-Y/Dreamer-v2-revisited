@@ -1,3 +1,4 @@
+import glob
 import os
 
 import torch
@@ -38,3 +39,6 @@ def save_experience_replay(cfg: DictConfig, episode: int, experience_replay, res
     if getattr(cfg, 'r2_enabled', False):
         from cloud_storage import upload_experience_replay
         upload_experience_replay(cfg, replay_path, episode, r2_prefix)
+    for old_path in glob.glob(os.path.join(results_dir, 'experience_replay_*.pt')):
+        if old_path != replay_path:
+            os.remove(old_path)

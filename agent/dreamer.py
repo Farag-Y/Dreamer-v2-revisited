@@ -18,6 +18,7 @@ class Dreamer(torch.nn.Module):
         self.cfg = cfg
         self.action_size = action_size
         self.device = device
+        self.collected_steps = 0
 
     @classmethod
     def from_config(cls, cfg: DictConfig, env: BaseEnv, device: str) -> "Dreamer":
@@ -48,23 +49,29 @@ class Dreamer(torch.nn.Module):
             next_obs, reward, done, terminated = env.step(action[0].cpu())
         return belief, state, action, next_obs, reward, done, terminated
 
-    def collect_episode(self, env: BaseEnv, replay: ExperienceReplay, explore: bool = True) -> float:
+    def collect_episode(
+        self, env: BaseEnv, replay: ExperienceReplay, explore: bool = True,
+    ) -> tuple[float, list[dict[str, float]]]:
         cfg = self.cfg
         belief = torch.zeros(1, cfg.belief_size, device=self.device)
         state  = torch.zeros(1, cfg.state_size,  device=self.device)
         action = torch.zeros(1, self.action_size, device=self.device)
         observation = env.reset()
         episode_reward = 0.0
+        results = []
         for _ in tqdm(range(cfg.max_episode_length // cfg.action_repeat)):
             belief, state, action, next_obs, reward, done, terminated = self.act(
                 env, observation, belief, state, action, explore)
             replay.append(observation, reward, action.squeeze(0).cpu(), terminated)
             episode_reward += reward
             observation = next_obs
+            self.collected_steps += 1
+            if self.collected_steps % cfg.train_every == 0:
+                results.append(self.train_on_batch(replay))
             if done:
                 replay.end_episode(observation)
                 break
-        return episode_reward
+        return episode_reward, results
 
     def train_on_batch(self, replay: ExperienceReplay) -> dict[str, float]:
         cfg = self.cfg

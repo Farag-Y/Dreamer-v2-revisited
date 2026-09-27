@@ -68,14 +68,12 @@ def test(cfg: DictConfig, dreamer: Dreamer, env: BaseEnv,
 
 def train(cfg: DictConfig, dreamer: Dreamer, experience_replay: ExperienceReplay,
           metrics: Metrics, env: BaseEnv, results_dir: str, r2_prefix: str = "") -> None:
-    # One gradient update per train_every collected steps: each round trains on the data collected since the last.
-    num_updates, trained_steps = cfg.pretrain_updates, experience_replay.steps
+    pretrain_results = [dreamer.train_on_batch(experience_replay) for _ in tqdm(range(cfg.pretrain_updates))]
     for episode in tqdm(range(metrics.last_episode + 1, cfg.episodes + 1), total=cfg.episodes, initial=metrics.last_episode):
-        results = [dreamer.train_on_batch(experience_replay) for _ in tqdm(range(num_updates))]
-        metrics.record(results)
-        episode_reward = dreamer.collect_episode(env, experience_replay, explore=True)
-        num_updates = max(1, (experience_replay.steps - trained_steps) // cfg.train_every)
-        trained_steps += num_updates * cfg.train_every
+        episode_reward, results = dreamer.collect_episode(env, experience_replay, explore=True)
+        results, pretrain_results = pretrain_results + results, []
+        if results:
+            metrics.record(results)
         metrics.episodes.append(episode)
         metrics.train_rewards.append(episode_reward)
         prev_env_steps = metrics.train_env_steps[-1] if metrics.train_env_steps else metrics.last_step

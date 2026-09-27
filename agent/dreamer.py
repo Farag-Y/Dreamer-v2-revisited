@@ -75,7 +75,8 @@ class Dreamer(torch.nn.Module):
 
     def train_on_batch(self, replay: ExperienceReplay) -> dict[str, float]:
         cfg = self.cfg
-        obs, actions, rewards, nonterminals, true_nonterminals = replay.sample(cfg.batch_size, cfg.chunk_size)
+        obs, actions, rewards, nonterminals, true_nonterminals = replay.sample(
+            cfg.batch_size, cfg.chunk_size, cfg.prioritize_ends)
         wm_result = self.world_model.train_step(obs, actions, rewards, nonterminals, true_nonterminals)
         state, belief = wm_result.pop('state'), wm_result.pop('belief')
         behavior_result = self.behavior.train_step(state, belief, true_nonterminals[:-1], self.world_model)

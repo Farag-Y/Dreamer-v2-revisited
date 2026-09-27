@@ -8,6 +8,7 @@ max_episode_length: 108000
 prefill_steps: 50000
 experience_size: 2000000
 train_every: 16
+prioritize_ends: true
 pretrain_updates: 1
 
 discount_model_gamma: 0.995

@@ -56,7 +56,7 @@ class ExperienceReplay:
         while self.episode_bounds and self.episode_bounds[0][0] < valid_start:
             self.episode_bounds.pop(0)
 
-    def _get_indexes(self, batch_size: int, batch_length: int) -> list[int]:
+    def _get_indexes(self, batch_size: int, batch_length: int, prioritize_ends: bool) -> list[int]:
 
         eligible = [(start, length) for start, length in self.episode_bounds if length >= batch_length]
         if not eligible:
@@ -68,7 +68,8 @@ class ExperienceReplay:
         batches = []
         for _ in range(batch_size):
             start, length = eligible[np.random.randint(len(eligible))]
-            offset = np.random.randint(length - batch_length + 1)
+            last_offset = length - batch_length
+            offset = min(np.random.randint(last_offset + 1 + (batch_length if prioritize_ends else 0)), last_offset)
             window_start = start + offset
             idxs = np.arange(window_start, window_start + batch_length) % self.size
             batches.append(idxs)
@@ -89,9 +90,9 @@ class ExperienceReplay:
         return obs, acts, rewards, non_terminals, true_nonterminals
 
     def sample(
-        self, batch_size: int, batch_length: int,
+        self, batch_size: int, batch_length: int, prioritize_ends: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        batch_idxs = self._get_indexes(batch_size, batch_length)
+        batch_idxs = self._get_indexes(batch_size, batch_length, prioritize_ends)
         batches = self._get_batch(batch_idxs, batch_size, batch_length)
         return batches
 

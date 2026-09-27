@@ -28,22 +28,27 @@ class ExperienceReplay:
         self.episode_bounds: list[tuple[int, int]] = []
         self._episode_start_step = 0
 
-    def append(
-        self, observation: torch.Tensor, reward: float, action: torch.Tensor, done: bool, terminated: bool,
+    def append(self, observation: torch.Tensor, reward: float, action: torch.Tensor, terminated: bool) -> None:
+        self._write(observation, reward, action, non_terminal=True, true_nonterminal=not terminated)
+
+    def end_episode(self, final_observation: torch.Tensor) -> None:
+        self._write(final_observation, 0.0, 0.0, non_terminal=False, true_nonterminal=True)
+        self.episode_bounds.append((self._episode_start_step, self.steps - self._episode_start_step))
+        self._episode_start_step = self.steps
+        self.episodes += 1
+
+    def _write(
+        self, observation: torch.Tensor, reward: float, action: torch.Tensor | float,
+        non_terminal: bool, true_nonterminal: bool,
     ) -> None:
         self.observations[self.idx] = postprocess_observation(observation.numpy())
         self.rewards[self.idx] = reward
         self.actions[self.idx] = action
-        self.non_terminals[self.idx] = not done
-        self.true_nonterminals[self.idx] = not terminated
+        self.non_terminals[self.idx] = non_terminal
+        self.true_nonterminals[self.idx] = true_nonterminal
         self.idx = (self.idx + 1) % self.size
         self.full = self.full or self.idx == 0
-        if done:
-            length = self.steps + 1 - self._episode_start_step
-            self.episode_bounds.append((self._episode_start_step, length))
-            self._episode_start_step = self.steps + 1
         self.steps += 1
-        self.episodes += (1 if done else 0)
         self._prune_stale_episodes()
 
     def _prune_stale_episodes(self) -> None:

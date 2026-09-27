@@ -238,6 +238,9 @@ class AtariEnv(BaseEnv):
     def step(self, action: torch.Tensor) -> tuple[torch.Tensor, float, bool, bool]:
         action_index = int(action.reshape(-1, self.action_size).argmax(-1)[0])
         frame, reward, terminated, truncated, _ = self._env.step(action_index)  # repeats action_repeat frames
+        if terminated or truncated:
+            # AtariPreprocessing stops before capturing the screen when the game ends mid-repeat
+            frame = cv2.resize(self._env.ale.getScreenGrayscale(), (64, 64), interpolation=cv2.INTER_AREA)
         self.t += self.action_repeat  # t counts raw frames, like the other envs
         done = terminated or truncated or self.t >= self.max_episode_length
         return self._to_observation(frame), float(reward), done, terminated

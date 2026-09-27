@@ -58,10 +58,11 @@ class Dreamer(torch.nn.Module):
         for _ in tqdm(range(cfg.max_episode_length // cfg.action_repeat)):
             belief, state, action, next_obs, reward, done, terminated = self.act(
                 env, observation, belief, state, action, explore)
-            replay.append(observation, reward, action.squeeze(0).cpu(), done, terminated)
+            replay.append(observation, reward, action.squeeze(0).cpu(), terminated)
             episode_reward += reward
             observation = next_obs
             if done:
+                replay.end_episode(observation)
                 break
         return episode_reward
 

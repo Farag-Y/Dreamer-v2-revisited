@@ -16,6 +16,7 @@ chunk_size: 50
 
 # Model
 cnn_depth: 48
+cnn_activation_function: elu
 hidden_size: 600
 num_classes: 32
 num_categorical: 32

@@ -72,5 +72,4 @@ def collect_observations(cfg: DictConfig, device: str, env: BaseEnv, metrics: Me
             observation = next_obs
         experience_replay.end_episode(observation)
         metrics.steps.append(env.t + metrics.last_step)
-        metrics.episodes.append(metrics.last_episode + 1)
     return experience_replay

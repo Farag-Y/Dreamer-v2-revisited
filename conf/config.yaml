@@ -57,6 +57,6 @@ checkpoint_interval: 25
 experience_replay_interval: 100  # save experience_replay_{episode}.pt alongside metrics.png every N episodes (0 = disabled)
 models: ""
 experience_replay_path: ""
-r2_enabled: true
+r2_enabled: false
 r2_bucket: "planet-checkpoints-vastai"
 r2_log_path: ""   # path to training log on disk; set to /workspace/training.log on Vast.ai

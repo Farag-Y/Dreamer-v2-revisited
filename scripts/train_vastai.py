@@ -192,8 +192,8 @@ def make_remote_runner(
             f"export CF_R2_ACCESS_KEY={r2_access_key}\n"
             f"export CF_R2_SECRET_KEY={r2_secret_key}\n"
         )
-        # inject log path so Python can upload training.log during checkpoints
-        extra_overrides = (extra_overrides + " r2_log_path=/workspace/training.log").strip()
+        # enable R2 and inject log path so Python can upload training.log during checkpoints
+        extra_overrides = (extra_overrides + " r2_enabled=true r2_log_path=/workspace/training.log").strip()
     cmd_line = f"{entrypoint_cmd} {extra_overrides}".strip()
     return f"""\
 #!/usr/bin/env bash

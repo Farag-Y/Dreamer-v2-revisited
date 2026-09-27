@@ -14,6 +14,20 @@ class RSSMOutput:
     posterior_logits:    torch.Tensor | None = None
 
 
+class LayerNormGRUCell(nn.Module):
+    def __init__(self, input_size: int, hidden_size: int, update_bias: float = -1.0) -> None:
+        super().__init__()
+        self.linear = nn.Linear(input_size + hidden_size, 3 * hidden_size)
+        self.norm = nn.LayerNorm(3 * hidden_size)
+        self.update_bias = update_bias
+
+    def forward(self, inputs: torch.Tensor, state: torch.Tensor) -> torch.Tensor:
+        reset, cand, update = self.norm(self.linear(torch.cat((inputs, state), dim=-1))).chunk(3, dim=-1)
+        cand = torch.tanh(torch.sigmoid(reset) * cand)
+        update = torch.sigmoid(update + self.update_bias)
+        return update * cand + (1 - update) * state
+
+
 class RSSM(nn.Module):
     def __init__(
         self,
@@ -31,7 +45,7 @@ class RSSM(nn.Module):
         self.num_categorical = num_categorical
         self.num_classes=num_classes
         self.fc_embed_state_action     = nn.Linear(state_size + action_size, belief_size)
-        self.rnn                       = nn.GRUCell(input_size=belief_size, hidden_size=belief_size)
+        self.rnn                       = LayerNormGRUCell(input_size=belief_size, hidden_size=belief_size)
         self.fc_embed_belief_prior     = nn.Linear(belief_size, hidden_size)
         self.fc_state_prior            = nn.Linear(hidden_size, num_categorical*num_classes)
         self.fc_embed_belief_posterior = nn.Linear(belief_size + obs_size, hidden_size)

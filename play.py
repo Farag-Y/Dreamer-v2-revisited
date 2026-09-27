@@ -89,7 +89,7 @@ def draw_discrete_overlay(surface, font, small_font, cfg_env, action_name, episo
 @hydra.main(config_path="conf", config_name="config", version_base=None)
 def main(cfg: DictConfig) -> None:
     env = Env(cfg.env, seed=cfg.seed, max_episode_length=cfg.max_episode_length,
-              action_repeat=1)
+              action_repeat=1, full_action_space=cfg.full_action_space)
 
     action_size = env.action_size
     print(f"\nPlaying: {cfg.env}")

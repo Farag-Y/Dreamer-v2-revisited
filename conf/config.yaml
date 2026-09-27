@@ -7,6 +7,8 @@ seed: 1
 
 # Environment
 imagination_horizon: 15
+# Atari only: all 18 actions as in the paper; the official release used each game's minimal action set
+full_action_space: true
 
 # Training
 episodes: 3000

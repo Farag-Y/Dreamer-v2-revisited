@@ -196,10 +196,12 @@ class DMControlEnv(BaseEnv):
 
 
 class AtariEnv(BaseEnv):
-    # DreamerV2 Atari setup: sticky actions (0.25), full 18-action space, no life-loss termination,
+    # DreamerV2 Atari setup: sticky actions (0.25), full or minimal action set, no life-loss termination,
     # 30 random no-ops at reset, max-pool over the last two frames, grayscale 64x64 observations.
     # Actions come in as one-hot vectors and are converted to the integer ALE action.
-    def __init__(self, env: str, seed: int, max_episode_length: int, action_repeat: int) -> None:
+    def __init__(
+        self, env: str, seed: int, max_episode_length: int, action_repeat: int, full_action_space: bool,
+    ) -> None:
         import ale_py
         import gymnasium as gym
         from gymnasium.wrappers import AtariPreprocessing
@@ -209,7 +211,7 @@ class AtariEnv(BaseEnv):
             env,
             frameskip=1,  # action repeat is done by AtariPreprocessing (frame_skip) below
             repeat_action_probability=0.25,
-            full_action_space=True,
+            full_action_space=full_action_space,
             render_mode="rgb_array",
         )
         self._env = AtariPreprocessing(
@@ -282,12 +284,12 @@ class AtariEnv(BaseEnv):
         return action
 
 
-def Env(env: str, seed: int, max_episode_length: int, action_repeat: int) -> BaseEnv:
+def Env(env: str, seed: int, max_episode_length: int, action_repeat: int, full_action_space: bool) -> BaseEnv:
     if env in GYM_ENVS:
         return GymEnv(env, seed, max_episode_length, action_repeat)
     elif env in DMCONTROL_ENVS:
         return DMControlEnv(env, seed, max_episode_length, action_repeat)
     elif env in ATARI_ENVS:
-        return AtariEnv(env, seed, max_episode_length, action_repeat)
+        return AtariEnv(env, seed, max_episode_length, action_repeat, full_action_space)
     else:
         raise ValueError(f"Unknown environment: '{env}'. Must be one of GYM_ENVS, DMCONTROL_ENVS or ATARI_ENVS.")

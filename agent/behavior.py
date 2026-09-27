@@ -105,7 +105,7 @@ def _compute_vlambda(
 def _outer_discount(discounts: torch.Tensor) -> torch.Tensor:
     batch = discounts.shape[0]
     ones = torch.ones(batch, 1, device=discounts.device, dtype=discounts.dtype)
-    return torch.cat([ones, torch.cumprod(discounts[:, 1:-1], dim=1)], dim=1).detach()
+    return torch.cat([ones, torch.cumprod(discounts[:, :-1], dim=1)], dim=1).detach()
 
 
 def _critic_loss(
@@ -192,10 +192,13 @@ class ActorCritic(nn.Module):
             action = self.actor.mode(belief, state)
         return action
 
-    def train_step(self, state: torch.Tensor, belief: torch.Tensor, world_model: "WorldModel") -> dict[str, float]:
+    def train_step(
+        self, state: torch.Tensor, belief: torch.Tensor, nonterminal: torch.Tensor, world_model: "WorldModel"
+    ) -> dict[str, float]:
         cfg = self.cfg
         state = state.reshape(-1, state.shape[-1]).detach()
         belief = belief.reshape(-1, belief.shape[-1]).detach()
+        start_discount = nonterminal.reshape(-1, 1) * cfg.discount_model_gamma
 
         with FreezeParameters(world_model.rssm):
             states, beliefs, rewards, discounts, actions = _imagine_rollout(
@@ -209,19 +212,20 @@ class ActorCritic(nn.Module):
                 discount_model_gamma=cfg.discount_model_gamma,
                 discount_enabled=self.discount_enabled,
             )
+            discounts = torch.cat([start_discount, discounts[:, 1:]], dim=1)
             v_lambda, values = _compute_vlambda(states, beliefs, rewards, discounts, self.target_critic, cfg.lam)
 
-        states_mid = states[:, 1:-1]
-        beliefs_mid = beliefs[:, 1:-1]
-        v_lambda_mid = v_lambda[:, 1:-1]
+        states = states[:, :-1]
+        beliefs = beliefs[:, :-1]
+        v_lambda = v_lambda[:, :-1]
         outer_discount = _outer_discount(discounts)
 
-        log_prob, entropy = _policy_terms(self.actor, beliefs_mid, states_mid, actions[:, 1:])
-        advantage = v_lambda_mid - values[:, 1:-1]  # baseline: target critic V(s_t)
+        log_prob, entropy = _policy_terms(self.actor, beliefs, states, actions)
+        advantage = v_lambda - values[:, :-1]  # baseline: target critic V(s_t)
 
         self.actor_optim.zero_grad()
         a_loss = _actor_loss(
-            v_lambda_mid,
+            v_lambda,
             outer_discount,
             log_prob,
             entropy,
@@ -234,7 +238,7 @@ class ActorCritic(nn.Module):
         self.actor_optim.step()
 
         self.critic_optim.zero_grad()
-        c_loss = _critic_loss(states_mid, beliefs_mid, v_lambda_mid, self.critic, outer_discount)
+        c_loss = _critic_loss(states, beliefs, v_lambda, self.critic, outer_discount)
         c_loss.backward()
         nn.utils.clip_grad_norm_(self.critic_optim.param_groups[0]["params"], cfg.grad_clip_norm)
         self.critic_optim.step()

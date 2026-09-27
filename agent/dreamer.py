@@ -65,9 +65,10 @@ class Dreamer(torch.nn.Module):
                 break
         return episode_reward
 
-    def train_on_batch(self, replay: ExperienceReplay) -> dict[str, torch.Tensor | float]:
+    def train_on_batch(self, replay: ExperienceReplay) -> dict[str, float]:
         cfg = self.cfg
         obs, actions, rewards, nonterminals, true_nonterminals = replay.sample(cfg.batch_size, cfg.chunk_size)
         wm_result = self.world_model.train_step(obs, actions, rewards, nonterminals, true_nonterminals)
-        behavior_result = self.behavior.train_step(wm_result['state'], wm_result['belief'], self.world_model)
+        state, belief = wm_result.pop('state'), wm_result.pop('belief')
+        behavior_result = self.behavior.train_step(state, belief, true_nonterminals[:-1], self.world_model)
         return {**wm_result, **behavior_result}

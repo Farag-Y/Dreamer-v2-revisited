@@ -140,6 +140,6 @@ class WorldModel(nn.Module):
         self.optimizer.step()
         return {
             **loss_components,
-            "belief": rssm_output.det_hidden_states[-1],
-            "state": rssm_output.posterior_states[-1],
+            "belief": rssm_output.det_hidden_states,
+            "state": rssm_output.posterior_states,
         }

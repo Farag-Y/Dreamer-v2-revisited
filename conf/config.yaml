@@ -11,7 +11,7 @@ imagination_horizon: 15
 full_action_space: true
 
 # Training
-episodes: 3000
+env_steps: 200_000_000 
 # Reference code: batch 16 with train_every 16 (Atari). The paper uses batch 50 with one update per 4 steps.
 batch_size: 16
 chunk_size: 50

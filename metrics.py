@@ -30,6 +30,10 @@ class Metrics:
     def last_step(self) -> int:
         return self.steps[-1] if self.steps else 0
 
+    @property
+    def last_env_step(self) -> int:
+        return self.train_env_steps[-1] if self.train_env_steps else self.last_step
+
     def record(self, results: list[dict]) -> None:
         n = len(results)
         self.kl_loss.append(sum(r['kl_loss'] for r in results) / n)

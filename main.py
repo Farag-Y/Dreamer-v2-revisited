@@ -69,15 +69,18 @@ def test(cfg: DictConfig, dreamer: Dreamer, env: BaseEnv,
 def train(cfg: DictConfig, dreamer: Dreamer, experience_replay: ExperienceReplay,
           metrics: Metrics, env: BaseEnv, results_dir: str, r2_prefix: str = "") -> None:
     pretrain_results = [dreamer.train_on_batch(experience_replay) for _ in tqdm(range(cfg.pretrain_updates))]
-    for episode in tqdm(range(metrics.last_episode + 1, cfg.episodes + 1), total=cfg.episodes, initial=metrics.last_episode):
+    progress = tqdm(total=cfg.env_steps, initial=metrics.last_env_step, unit="frame")
+    episode = metrics.last_episode
+    while metrics.last_env_step < cfg.env_steps:
+        episode += 1
         episode_reward, results = dreamer.collect_episode(env, experience_replay, explore=True)
         results, pretrain_results = pretrain_results + results, []
         if results:
             metrics.record(results)
         metrics.episodes.append(episode)
         metrics.train_rewards.append(episode_reward)
-        prev_env_steps = metrics.train_env_steps[-1] if metrics.train_env_steps else metrics.last_step
-        metrics.train_env_steps.append(prev_env_steps + env.t)
+        metrics.train_env_steps.append(metrics.last_env_step + env.t)
+        progress.update(env.t)
         plot_metrics(metrics, results_dir)
         if cfg.test_interval and episode % cfg.test_interval == 0:
             test(cfg, dreamer, env, metrics, results_dir, episode=episode)

@@ -118,7 +118,7 @@ def main(cfg: DictConfig) -> None:
         experience_replay = (ExperienceReplay.load(cfg.experience_replay_path, device)
                              if cfg.experience_replay_path
                              else collect_observations(cfg, device, env, metrics))
-        run_id = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        run_id = cfg.run_id or datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         results_dir = os.path.join(hydra.utils.get_original_cwd(), 'results', run_id)
         os.makedirs(results_dir, exist_ok=True)
         if getattr(cfg, 'r2_enabled', False):

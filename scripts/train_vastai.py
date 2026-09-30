@@ -22,6 +22,7 @@ import typer
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 INSTANCE_START_TIMEOUT = 600  # seconds to wait for instance to reach "running" status
+LOG_UPLOAD_INTERVAL = 300  # seconds between background training.log uploads to R2
 
 GPU_NAMES = ["RTX 3060", "RTX 4090", "RTX 3090", "A100 SXM4 80GB", "H100 NVL", "A6000"]
 GPU_FILTERS = ["RTX_3060", "RTX_4090", "RTX_3090", "A100_SXM4_80GB", "H100_NVL", "A6000"]
@@ -185,15 +186,19 @@ def make_remote_runner(
     r2_secret_key: str = "",
 ) -> str:
     keep_alive_str = "true" if keep_alive else "false"
+    r2_on = "false"
     r2_exports = ""
     if r2_account_id and r2_access_key and r2_secret_key:
+        r2_on = "true"
         r2_exports = (
             f"export CF_R2_ACCOUNT_ID={r2_account_id}\n"
             f"export CF_R2_ACCESS_KEY={r2_access_key}\n"
             f"export CF_R2_SECRET_KEY={r2_secret_key}\n"
         )
         # enable R2 and inject log path so Python can upload training.log during checkpoints
-        extra_overrides = (extra_overrides + " r2_enabled=true r2_log_path=/workspace/training.log").strip()
+        extra_overrides = (
+            extra_overrides + " r2_enabled=true r2_log_path=/workspace/training.log run_id=$RUN_ID"
+        ).strip()
     cmd_line = f"{entrypoint_cmd} {extra_overrides}".strip()
     return f"""\
 #!/usr/bin/env bash
@@ -201,11 +206,68 @@ cd /workspace
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
 export PYTHONUNBUFFERED=1
+export PYTHONFAULTHANDLER=1
+export HYDRA_FULL_ERROR=1
 {r2_exports}
+RUN_ID=$(date +%Y-%m-%d_%H-%M-%S)
+LOG_UPLOAD_INTERVAL={LOG_UPLOAD_INTERVAL}
+
+upload_logs() {{
+  [[ "{r2_on}" == "true" ]] || return 0
+  timeout 120 uv run --no-sync python scripts/upload_logs.py "$RUN_ID" "$@" || echo "[remote] Log upload failed."
+}}
+
+write_error_log() {{
+  {{
+    echo "=== exit code: $1 ($(date)) ==="
+    if (( $1 > 128 )); then
+      echo "Killed by signal $(( $1 - 128 )) (SIG$(kill -l $(( $1 - 128 )))). 137 = SIGKILL, usually out of memory."
+    fi
+    echo; echo "=== last 300 lines of training.log ==="
+    tail -n 300 /workspace/training.log
+    echo; echo "=== memory ==="
+    free -m
+    cat /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.peak 2>/dev/null
+    cat /sys/fs/cgroup/memory/memory.failcnt /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null
+    echo; echo "=== disk ==="
+    df -h /workspace
+    echo; echo "=== nvidia-smi ==="
+    nvidia-smi
+    echo; echo "=== dmesg (last 50) ==="
+    dmesg -T 2>&1 | tail -n 50
+  }} > /workspace/error.log 2>&1
+}}
+
+on_term() {{
+  echo "[remote] Runner got SIGTERM, saving logs..."
+  kill -TERM $TRAIN_PID 2>/dev/null
+  write_error_log 143
+  upload_logs /workspace/training.log /workspace/error.log
+  exit 143
+}}
+trap on_term TERM
+
+(
+  while true; do
+    sleep $LOG_UPLOAD_INTERVAL
+    upload_logs /workspace/training.log > /dev/null 2>&1
+  done
+) &
+UPLOADER_PID=$!
+
+echo "[remote] Run ID: $RUN_ID"
 echo "[remote] Starting: {cmd_line}"
-{cmd_line}
+{cmd_line} &
+TRAIN_PID=$!
+wait $TRAIN_PID
 EXIT_CODE=$?
+kill $UPLOADER_PID 2>/dev/null
 echo "[remote] Run finished (exit $EXIT_CODE)."
+if [[ $EXIT_CODE -ne 0 ]]; then
+  write_error_log $EXIT_CODE
+  echo "[remote] Error details saved to /workspace/error.log"
+fi
+upload_logs /workspace/training.log /workspace/error.log
 if [[ "{keep_alive_str}" == "true" ]]; then
   echo "[remote] --keep-alive set: instance will NOT be destroyed."
 else

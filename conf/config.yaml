@@ -63,3 +63,4 @@ experience_replay_path: ""
 r2_enabled: false
 r2_bucket: "planet-checkpoints-vastai"
 r2_log_path: ""   # path to training log on disk; set to /workspace/training.log on Vast.ai
+run_id: ""        # R2 prefix / results dir name; empty = current timestamp
